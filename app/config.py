@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     enable_live_trading: bool = False
     default_broker: str = "paper"
     admin_username: str = "admin"
-    admin_password: str = "admin"
+    admin_password: str = "change-me-now"
     admin_password_hash: str | None = None
     admin_role: str = "paper"
     log_level: str = "INFO"

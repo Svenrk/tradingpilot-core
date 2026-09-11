@@ -41,4 +41,5 @@ Remove the module name from `TP_ENABLED_MODULES`. The registry skips importing i
 - Risk is the final gate: execution raises unless the risk decision is approved.
 - Live trading stays off unless runtime mode is `live` **and** `TP_ENABLE_LIVE_TRADING=true`.
 - Money values are stored as `Decimal` and persisted with SQLAlchemy `Numeric` columns.
+- Configure `TP_ADMIN_PASSWORD_HASH` or set a non-default `TP_ADMIN_PASSWORD` before startup.
 - Tests use SQLite + in-memory store/event bus fallback; Redis is optional during local development.

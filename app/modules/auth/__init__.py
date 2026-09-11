@@ -45,7 +45,13 @@ async def login(payload: LoginRequest, request: Request, response: Response) -> 
         csrf_token=ctx.state["csrf_token_factory"](),
     )
     session_id = await create_session(ctx.state["store"], settings, session)
-    response.set_cookie(settings.session_cookie_name, session_id, httponly=True, samesite="strict")
+    response.set_cookie(
+        settings.session_cookie_name,
+        session_id,
+        httponly=True,
+        samesite="strict",
+        secure=True,
+    )
     return UserResponse.model_validate(session.model_dump())
 
 
@@ -71,9 +77,14 @@ class AuthModule(BaseModule):
 
     async def on_startup(self, ctx: AppContext) -> None:
         settings = get_settings()
-        ctx.state["auth_password_hash"] = settings.admin_password_hash or hash_password(
-            settings.admin_password
-        )
+        if settings.admin_password_hash:
+            ctx.state["auth_password_hash"] = settings.admin_password_hash
+        elif settings.admin_password not in {"admin", "change-me-now"}:
+            ctx.state["auth_password_hash"] = hash_password(settings.admin_password)
+        else:
+            raise RuntimeError(
+                "Configure TP_ADMIN_PASSWORD_HASH or a non-default TP_ADMIN_PASSWORD before startup"
+            )
         ctx.state["csrf_token_factory"] = __import__("secrets").token_urlsafe
 
     def routers(self):

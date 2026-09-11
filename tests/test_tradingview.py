@@ -32,6 +32,36 @@ async def test_webhook_persists_event_and_outbox(client, test_db_url: str) -> No
     assert outbox is not None
 
 
+async def test_webhook_duplicate_event_does_not_enqueue_twice(client, test_db_url: str) -> None:
+    body = (
+        b'{"event_id":"evt-dup","symbol":"BTCUSDT","timeframe":"1m","side":"BUY","price":"101.25"}'
+    )
+    headers = {"X-Signature": _signature(body), "Content-Type": "application/json"}
+    first = await client.post("/api/v1/tv/webhook/demo", content=body, headers=headers)
+    second = await client.post("/api/v1/tv/webhook/demo", content=body, headers=headers)
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert second.json()["status"] == "duplicate"
+    session_factory = get_session_factory(test_db_url)
+    async with session_factory() as session:
+        events = (
+            (
+                await session.execute(
+                    select(TradingViewEvent).where(TradingViewEvent.dedupe_key == "evt-dup")
+                )
+            )
+            .scalars()
+            .all()
+        )
+        outbox = (
+            (await session.execute(select(EventOutbox).where(EventOutbox.dedupe_key == "evt-dup")))
+            .scalars()
+            .all()
+        )
+    assert len(events) == 1
+    assert len(outbox) == 1
+
+
 async def test_webhook_rejects_bad_signature(client) -> None:
     response = await client.post(
         "/api/v1/tv/webhook/demo",

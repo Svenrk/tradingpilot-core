@@ -19,7 +19,7 @@ def test_env(monkeypatch: pytest.MonkeyPatch, test_db_url: str) -> None:
     monkeypatch.setenv("TP_DATABASE_URL", test_db_url)
     monkeypatch.setenv("TP_REDIS_URL", "")
     monkeypatch.setenv("TP_TV_WEBHOOK_SECRET", "secret")
-    monkeypatch.setenv("TP_ADMIN_PASSWORD", "admin")
+    monkeypatch.setenv("TP_ADMIN_PASSWORD", "test-password")
     get_settings.cache_clear()
     reset_db_state()
 
