@@ -158,13 +158,14 @@ async def test_risk_engine_rejects_daily_loss_breach(test_env, test_db_url: str)
 async def test_risk_engine_rejects_exposure_cap(test_env, test_db_url: str) -> None:
     ctx, session_factory = await _build_risk_context(
         test_db_url,
-        RuntimeSettings(exposure_cap=Decimal("50")),
+        RuntimeSettings(exposure_cap=Decimal("150")),
     )
     async with session_factory() as session:
         pipeline_ctx = PipelineContext(app=ctx, session=session, payload={"dedupe_key": "x"})
         pipeline_ctx.snapshot = MarketSnapshot(
             "BTCUSDT", "1m", Decimal("100"), [Decimal("99"), Decimal("100")]
         )
+        pipeline_ctx.metadata["quantity"] = Decimal("2")
         pipeline_ctx.signal = type(
             "Signal",
             (),

@@ -56,7 +56,8 @@ class RiskService:
                 Position.status == "OPEN"
             )
         )
-        projected = Decimal(exposure or 0) + (ctx.snapshot.price * Decimal("1"))
+        quantity = ctx.metadata.get("quantity", Decimal("1"))
+        projected = Decimal(exposure or 0) + (ctx.snapshot.price * quantity)
         if projected > runtime.exposure_cap:
             reasons.append("Exposure cap exceeded")
         return RiskDecision(not reasons, reasons or ["Approved"])

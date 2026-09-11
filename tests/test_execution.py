@@ -48,6 +48,7 @@ async def test_paper_broker_execution_creates_position(test_env, test_db_url: st
         pipeline_ctx.snapshot = MarketSnapshot(
             "BTCUSDT", "1m", Decimal("100"), [Decimal("99"), Decimal("100")]
         )
+        pipeline_ctx.metadata["quantity"] = Decimal("2")
         pipeline_ctx.signal = type(
             "Signal",
             (),
@@ -56,7 +57,9 @@ async def test_paper_broker_execution_creates_position(test_env, test_db_url: st
         pipeline_ctx.risk_decision = type("RiskDecision", (), {"approved": True})()
         order, position = await ExecutionService(PaperBroker()).execute(pipeline_ctx)
         assert order.status == "FILLED"
+        assert order.quantity == Decimal("2")
         assert position.symbol == "BTCUSDT"
+        assert position.quantity == Decimal("2")
 
 
 @pytest.mark.asyncio

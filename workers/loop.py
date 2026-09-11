@@ -12,6 +12,8 @@ async def run_loop(name: str, coro_factory: Callable[[], Awaitable[None]], inter
         try:
             await coro_factory()
             logger.debug("Loop %s heartbeat", name)
+        except asyncio.CancelledError:
+            raise
         except Exception:
             logger.exception("Loop %s failed", name)
         await asyncio.sleep(interval)

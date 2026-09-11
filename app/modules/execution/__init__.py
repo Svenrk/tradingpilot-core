@@ -50,12 +50,13 @@ class ExecutionService:
             raise RuntimeError("Execution requires approved risk decision")
         if ctx.signal is None or ctx.signal.action == "HOLD":
             return None
+        quantity = ctx.metadata.get("quantity", Decimal("1"))
         order = Order(
             client_order_id=str(uuid4()),
             symbol=ctx.snapshot.symbol,
             side=ctx.signal.action,
             status="pending",
-            quantity=Decimal("1"),
+            quantity=quantity,
             price=ctx.snapshot.price,
             stop_loss=ctx.signal.stop_loss,
             take_profit=ctx.signal.take_profit,

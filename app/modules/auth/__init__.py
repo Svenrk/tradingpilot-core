@@ -51,6 +51,8 @@ async def login(payload: LoginRequest, request: Request, response: Response) -> 
         httponly=True,
         samesite="strict",
         secure=settings.session_cookie_secure,
+        max_age=settings.session_ttl_seconds,
+        expires=settings.session_ttl_seconds,
     )
     return UserResponse.model_validate(session.model_dump())
 

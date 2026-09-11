@@ -4,13 +4,13 @@ from decimal import Decimal
 
 import pytest
 
-from app.modules.market_data import SnapshotService
+from app.modules.market_data import MarketDataProviderError, SnapshotService
 
 
 class FailingProvider:
     async def get_closes(self, symbol: str, timeframe: str, limit: int = 100) -> list[Decimal]:
         del symbol, timeframe, limit
-        raise RuntimeError("primary unavailable")
+        raise MarketDataProviderError("primary unavailable")
 
 
 class StaticProvider:

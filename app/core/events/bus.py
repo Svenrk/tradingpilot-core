@@ -70,10 +70,13 @@ class RedisStreamBus:
         await self.redis.xadd(stream, serialised)
 
     async def _ensure_group(self, stream: str, group: str) -> None:
+        from redis.exceptions import ResponseError
+
         try:
             await self.redis.xgroup_create(stream, group, id="$", mkstream=True)
-        except Exception:
-            return None
+        except ResponseError as exc:
+            if "BUSYGROUP" not in str(exc):
+                raise
 
     async def consume(
         self, stream: str, consumer: str, group: str, timeout: float = 1.0

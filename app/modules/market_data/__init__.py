@@ -22,6 +22,10 @@ class MarketDataProvider(Protocol):
     async def get_closes(self, symbol: str, timeframe: str, limit: int = 100) -> list[Decimal]: ...
 
 
+class MarketDataProviderError(RuntimeError):
+    pass
+
+
 class BinanceMarketDataProvider:
     async def get_closes(self, symbol: str, timeframe: str, limit: int = 100) -> list[Decimal]:
         params: dict[str, str | int] = {"symbol": symbol, "interval": timeframe, "limit": limit}
@@ -58,7 +62,7 @@ class SnapshotService:
     async def _get_closes(self, symbol: str, timeframe: str) -> list[Decimal]:
         try:
             return await self.primary.get_closes(symbol, timeframe)
-        except Exception:
+        except (httpx.HTTPError, MarketDataProviderError):
             return await self.fallback.get_closes(symbol, timeframe)
 
 
@@ -68,6 +72,7 @@ async def build_snapshot_step(ctx: PipelineContext) -> None:
     if ctx.event is not None:
         merged_payload.update(ctx.event.payload)
     ctx.snapshot = await service.build_snapshot(merged_payload)
+    ctx.metadata["quantity"] = to_decimal(merged_payload.get("quantity", 1))
     ctx.app.state.setdefault("latest_prices", {})[ctx.snapshot.symbol] = to_decimal(
         ctx.snapshot.price
     )
