@@ -1,0 +1,114 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from decimal import Decimal
+from uuid import uuid4
+
+from sqlalchemy import select
+
+from app.core.module import AppContext, BaseModule, PipelineContext, PipelineStep
+from app.models import Order, Position
+
+
+@dataclass(slots=True)
+class BrokerOrderResult:
+    order_id: str
+    status: str
+    filled_price: Decimal
+    filled_quantity: Decimal
+
+
+class Broker:
+    async def place_order(
+        self, order: Order
+    ) -> BrokerOrderResult:  # pragma: no cover - interface-like
+        raise NotImplementedError
+
+
+class PaperBroker(Broker):
+    async def place_order(self, order: Order) -> BrokerOrderResult:
+        return BrokerOrderResult(
+            order_id=order.client_order_id,
+            status="filled",
+            filled_price=order.price,
+            filled_quantity=order.quantity,
+        )
+
+
+def create_broker(app_settings) -> Broker:
+    del app_settings
+    return PaperBroker()
+
+
+class ExecutionService:
+    def __init__(self, broker: Broker) -> None:
+        self.broker = broker
+
+    async def execute(self, ctx: PipelineContext) -> tuple[Order, Position] | None:
+        if ctx.risk_decision is None or not ctx.risk_decision.approved:
+            raise RuntimeError("Execution requires approved risk decision")
+        if ctx.signal is None or ctx.signal.action == "HOLD":
+            return None
+        order = Order(
+            client_order_id=str(uuid4()),
+            symbol=ctx.snapshot.symbol,
+            side=ctx.signal.action,
+            status="pending",
+            quantity=Decimal("1"),
+            price=ctx.snapshot.price,
+            stop_loss=ctx.signal.stop_loss,
+            take_profit=ctx.signal.take_profit,
+            broker="paper",
+        )
+        ctx.session.add(order)
+        await ctx.session.flush()
+        result = await self.broker.place_order(order)
+        order.status = result.status.upper()
+        order.price = result.filled_price
+        position = await ctx.session.scalar(select(Position).where(Position.symbol == order.symbol))
+        if position is None:
+            position = Position(
+                symbol=order.symbol,
+                side=order.side,
+                quantity=result.filled_quantity,
+                entry_price=result.filled_price,
+                stop_loss=order.stop_loss,
+                take_profit=order.take_profit,
+                status="OPEN",
+            )
+            ctx.session.add(position)
+        else:
+            position.side = order.side
+            position.quantity = result.filled_quantity
+            position.entry_price = result.filled_price
+            position.stop_loss = order.stop_loss
+            position.take_profit = order.take_profit
+            position.status = "OPEN"
+        await ctx.session.flush()
+        return order, position
+
+
+async def execute_order_step(ctx: PipelineContext) -> None:
+    service: ExecutionService = ctx.app.state["execution_service"]
+    result = await service.execute(ctx)
+    if result is not None:
+        ctx.order, ctx.position = result
+
+
+class ExecutionModule(BaseModule):
+    name = "execution"
+    depends_on = ("risk_engine",)
+
+    async def on_startup(self, ctx: AppContext) -> None:
+        broker = create_broker(ctx.settings)
+        ctx.state["broker"] = broker
+        ctx.state["execution_service"] = ExecutionService(broker)
+
+    def models(self):
+        return [Order, Position]
+
+    def pipeline_steps(self):
+        return [PipelineStep(name="execute_order", order=40, handler=execute_order_step)]
+
+
+module = ExecutionModule()

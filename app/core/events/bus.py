@@ -1,0 +1,90 @@
+from __future__ import annotations
+
+import asyncio
+import json
+from collections import defaultdict
+from collections.abc import AsyncIterator
+from typing import Any, Protocol
+
+
+class EventBus(Protocol):
+    async def publish(self, stream: str, payload: dict) -> None: ...
+    async def consume(
+        self, stream: str, consumer: str, group: str, timeout: float = 1.0
+    ) -> dict | None: ...
+    async def iter_stream(self, stream: str, consumer: str, group: str) -> AsyncIterator[dict]: ...
+    async def close(self) -> None: ...
+
+
+class MemoryEventBus:
+    def __init__(self) -> None:
+        self._queues: dict[str, asyncio.Queue[dict]] = defaultdict(asyncio.Queue)
+
+    async def publish(self, stream: str, payload: dict) -> None:
+        await self._queues[stream].put(dict(payload))
+
+    async def consume(
+        self, stream: str, consumer: str, group: str, timeout: float = 1.0
+    ) -> dict | None:
+        del consumer, group
+        try:
+            return await asyncio.wait_for(self._queues[stream].get(), timeout=timeout)
+        except TimeoutError:
+            return None
+
+    async def iter_stream(self, stream: str, consumer: str, group: str) -> AsyncIterator[dict]:
+        while True:
+            message = await self.consume(stream, consumer=consumer, group=group, timeout=1.0)
+            if message is not None:
+                yield message
+
+    async def close(self) -> None:
+        return None
+
+
+class RedisStreamBus:
+    def __init__(self, redis_url: str) -> None:
+        from redis.asyncio import Redis
+
+        self.redis: Any = Redis.from_url(redis_url, decode_responses=True)
+
+    async def publish(self, stream: str, payload: dict) -> None:
+        serialised = {key: json.dumps(value) for key, value in payload.items()}
+        await self.redis.xadd(stream, serialised)
+
+    async def _ensure_group(self, stream: str, group: str) -> None:
+        try:
+            await self.redis.xgroup_create(stream, group, id="$", mkstream=True)
+        except Exception:
+            return None
+
+    async def consume(
+        self, stream: str, consumer: str, group: str, timeout: float = 1.0
+    ) -> dict | None:
+        await self._ensure_group(stream, group)
+        response = await self.redis.xreadgroup(
+            groupname=group,
+            consumername=consumer,
+            streams={stream: ">"},
+            count=1,
+            block=int(timeout * 1000),
+        )
+        if not response:
+            return None
+        _, entries = response[0]
+        message_id, values = entries[0]
+        await self.redis.xack(stream, group, message_id)
+        return {key: json.loads(value) for key, value in values.items()}
+
+    async def iter_stream(self, stream: str, consumer: str, group: str) -> AsyncIterator[dict]:
+        while True:
+            message = await self.consume(stream, consumer=consumer, group=group, timeout=1.0)
+            if message is not None:
+                yield message
+
+    async def close(self) -> None:
+        await self.redis.aclose()
+
+
+def create_event_bus(redis_url: str | None):
+    return RedisStreamBus(redis_url) if redis_url else MemoryEventBus()

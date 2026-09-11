@@ -1,0 +1,9 @@
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+.env
+*.pyc
+alembic.ini.bak
+tradingpilot.db

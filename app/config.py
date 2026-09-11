@@ -1,0 +1,53 @@
+from __future__ import annotations
+
+from functools import lru_cache
+from typing import Any
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEFAULT_MODULES = [
+    "tradingview",
+    "market_data",
+    "signal_engine",
+    "risk_engine",
+    "execution",
+    "positions",
+    "auth",
+    "settings",
+    "dashboard",
+]
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_prefix="TP_", extra="ignore")
+
+    app_name: str = "TradingPilot Core"
+    app_version: str = "0.1.0"
+    api_prefix: str = "/api/v1"
+    database_url: str = "sqlite+aiosqlite:///./tradingpilot.db"
+    redis_url: str | None = None
+    enabled_modules: list[str] = Field(default_factory=lambda: list(DEFAULT_MODULES))
+    symbol_allowlist: list[str] = Field(default_factory=lambda: ["BTCUSDT", "ETHUSDT"])
+    timeframe_allowlist: list[str] = Field(default_factory=lambda: ["1m", "5m", "15m", "1h"])
+    tv_webhook_secret: str = "change-me"
+    session_cookie_name: str = "tp_session"
+    session_ttl_seconds: int = 60 * 60 * 12
+    enable_live_trading: bool = False
+    default_broker: str = "paper"
+    admin_username: str = "admin"
+    admin_password: str = "admin"
+    admin_role: str = "paper"
+    log_level: str = "INFO"
+
+    @field_validator("enabled_modules", "symbol_allowlist", "timeframe_allowlist", mode="before")
+    @classmethod
+    def _split_csv(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()
