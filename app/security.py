@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -28,6 +29,7 @@ class SessionData(BaseModel):
 class KeyValueStore(Protocol):
     async def get(self, key: str) -> str | None: ...
     async def set(self, key: str, value: str, ex: int | None = None) -> None: ...
+    async def incr(self, key: str, ex: int | None = None) -> int: ...
     async def delete(self, key: str) -> None: ...
     async def close(self) -> None: ...
 
@@ -50,6 +52,16 @@ class MemoryStore:
         expires_at = None if ex is None else datetime.now(UTC) + timedelta(seconds=ex)
         self._data[key] = (value, expires_at)
 
+    async def incr(self, key: str, ex: int | None = None) -> int:
+        current = await self.get(key)
+        if current is None:
+            await self.set(key, "1", ex=ex)
+            return 1
+        value = int(current) + 1
+        _, expires_at = self._data[key]
+        self._data[key] = (str(value), expires_at)
+        return value
+
     async def delete(self, key: str) -> None:
         self._data.pop(key, None)
 
@@ -68,6 +80,12 @@ class RedisStore:
 
     async def set(self, key: str, value: str, ex: int | None = None) -> None:
         await self.redis.set(key, value, ex=ex)
+
+    async def incr(self, key: str, ex: int | None = None) -> int:
+        value = await self.redis.incr(key)
+        if value == 1 and ex is not None:
+            await self.redis.expire(key, ex)
+        return int(value)
 
     async def delete(self, key: str) -> None:
         await self.redis.delete(key)
@@ -92,6 +110,16 @@ def verify_password(password: str, hashed_password: str) -> bool:
     expected = base64.b64decode(digest_b64)
     actual = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1)
     return hmac.compare_digest(actual, expected)
+
+
+async def hash_password_async(password: str) -> str:
+    """Run CPU-heavy scrypt hashing off the event loop."""
+    return await asyncio.to_thread(hash_password, password)
+
+
+async def verify_password_async(password: str, hashed_password: str) -> bool:
+    """Run CPU-heavy scrypt verification off the event loop."""
+    return await asyncio.to_thread(verify_password, password, hashed_password)
 
 
 async def create_session(store: KeyValueStore, settings: Settings, data: SessionData) -> str:
@@ -131,9 +159,11 @@ class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        session_id = request.cookies.get(self.settings.session_cookie_name)
-        request.state.session = await get_session_data(self.store, session_id)
-        if not is_public_path(request.url.path):
+        if is_public_path(request.url.path):
+            request.state.session = None
+        else:
+            session_id = request.cookies.get(self.settings.session_cookie_name)
+            request.state.session = await get_session_data(self.store, session_id)
             if request.state.session is None:
                 return JSONResponse(
                     {"detail": "Authentication required"}, status_code=status.HTTP_401_UNAUTHORIZED

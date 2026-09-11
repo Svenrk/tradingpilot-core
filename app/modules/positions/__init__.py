@@ -11,11 +11,15 @@ from app.models import Position
 
 class PositionService:
     async def reconcile(self, ctx: AppContext) -> None:
-        latest_prices = ctx.state.get("latest_prices", {})
         async with ctx.session_factory() as session:
             result = await session.execute(select(Position).where(Position.status == "OPEN"))
-            for position in result.scalars():
-                price = latest_prices.get(position.symbol)
+            positions = list(result.scalars())
+            if not positions:
+                return
+            prices = await self._latest_prices(ctx, {position.symbol for position in positions})
+            changed = False
+            for position in positions:
+                price = prices.get(position.symbol)
                 if price is None:
                     continue
                 pnl = self._realized_pnl(
@@ -31,20 +35,31 @@ class PositionService:
                     position.status = "CLOSED"
                     position.realized_pnl = pnl
                     position.closed_at = datetime.now(UTC)
+                    changed = True
                 elif position.stop_loss is not None and (
                     (position.side == "BUY" and price <= position.stop_loss)
                     or (position.side == "SELL" and price >= position.stop_loss)
                 ):
-                    pnl = self._realized_pnl(
-                        position.side,
-                        position.entry_price,
-                        price,
-                        position.quantity,
-                    )
                     position.status = "CLOSED"
                     position.realized_pnl = pnl
                     position.closed_at = datetime.now(UTC)
-            await session.commit()
+                    changed = True
+            if changed:
+                await session.commit()
+
+    @staticmethod
+    async def _latest_prices(ctx: AppContext, symbols: set[str]) -> dict[str, Decimal]:
+        """Resolve latest prices from the shared store, falling back to process state."""
+        prices: dict[str, Decimal] = {}
+        local_prices = ctx.state.get("latest_prices", {})
+        store = ctx.state.get("store")
+        for symbol in symbols:
+            value = await store.get(f"price:{symbol}") if store is not None else None
+            if value is not None:
+                prices[symbol] = Decimal(value)
+            elif symbol in local_prices:
+                prices[symbol] = local_prices[symbol]
+        return prices
 
     @staticmethod
     def _realized_pnl(

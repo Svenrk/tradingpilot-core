@@ -11,7 +11,7 @@ from sqlalchemy import select
 import app.models  # noqa: F401
 from app.config import get_settings
 from app.core.events.bus import create_event_bus
-from app.core.events.reliable import flush_outbox, record_inbox
+from app.core.events.reliable import flush_outbox, purge_history, record_inbox
 from app.core.module import AppContext, PipelineContext
 from app.core.registry import ModuleRegistry
 from app.db import get_session_factory, init_db
@@ -64,18 +64,54 @@ async def pump_outbox(ctx: AppContext) -> None:
         await session.commit()
 
 
+async def purge_expired_history(ctx: AppContext) -> None:
+    async with ctx.session_factory() as session:
+        deleted = await purge_history(session, older_than_days=ctx.settings.retention_days)
+        await session.commit()
+    if deleted:
+        logger.info("Purged %s expired history rows", deleted)
+
+
+async def _handle_message(ctx: AppContext, payload: dict, semaphore: asyncio.Semaphore) -> None:
+    async with semaphore:
+        message_id = payload.get("_message_id")
+        success = await process_pipeline_message(ctx, payload)
+        if success and isinstance(message_id, str):
+            await ctx.event_bus.ack("tv_events", "pipeline", message_id)
+
+
 async def consume_forever(ctx: AppContext) -> None:
     consumer = str(uuid4())
+    semaphore = asyncio.Semaphore(ctx.settings.worker_concurrency)
     while True:
         await pump_outbox(ctx)
-        payload = await ctx.event_bus.consume(
-            "tv_events", consumer=consumer, group="pipeline", timeout=1.0
+        payloads = await ctx.event_bus.consume_batch(
+            "tv_events",
+            consumer=consumer,
+            group="pipeline",
+            count=ctx.settings.worker_batch_size,
+            timeout=1.0,
         )
-        if payload is not None:
-            message_id = payload.get("_message_id")
-            success = await process_pipeline_message(ctx, payload)
-            if success and isinstance(message_id, str):
-                await ctx.event_bus.ack("tv_events", "pipeline", message_id)
+        if payloads:
+            await asyncio.gather(
+                *(_handle_message(ctx, payload, semaphore) for payload in payloads)
+            )
+
+
+async def reclaim_pending(ctx: AppContext) -> None:
+    """Reprocess messages stranded by consumers that died mid-message."""
+    consumer = str(uuid4())
+    semaphore = asyncio.Semaphore(ctx.settings.worker_concurrency)
+    payloads = await ctx.event_bus.claim_pending(
+        "tv_events",
+        consumer=consumer,
+        group="pipeline",
+        min_idle_seconds=ctx.settings.pending_claim_idle_seconds,
+        count=ctx.settings.worker_batch_size,
+    )
+    if payloads:
+        logger.warning("Reclaimed %s stale pending messages", len(payloads))
+        await asyncio.gather(*(_handle_message(ctx, payload, semaphore) for payload in payloads))
 
 
 async def run_worker() -> None:
@@ -90,7 +126,18 @@ async def run_worker() -> None:
     ctx.state["store"] = store
     await init_db(settings.database_url)
     await registry.startup(ctx)
-    loops = []
+    loops = [
+        run_loop(
+            "reclaim_pending",
+            partial(reclaim_pending, ctx),
+            float(ctx.settings.pending_claim_idle_seconds),
+        ),
+        run_loop(
+            "purge_history",
+            partial(purge_expired_history, ctx),
+            ctx.settings.retention_interval_seconds,
+        ),
+    ]
     for module in registry.modules:
         for spec in module.background_loops():
             loops.append(

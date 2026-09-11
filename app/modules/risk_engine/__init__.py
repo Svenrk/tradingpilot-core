@@ -36,9 +36,13 @@ class RiskService:
                 reasons.append("Invalid stop-loss")
             elif reward / risk < runtime.min_reward_risk:
                 reasons.append("Reward-to-risk below minimum")
-        open_positions = await ctx.session.scalar(
-            select(func.count()).select_from(Position).where(Position.status == "OPEN")
+        open_stats = await ctx.session.execute(
+            select(
+                func.count(),
+                func.coalesce(func.sum(Position.entry_price * Position.quantity), 0),
+            ).where(Position.status == "OPEN")
         )
+        open_positions, exposure = open_stats.one()
         if open_positions and open_positions >= runtime.max_positions:
             reasons.append("Max positions reached")
         day_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -51,11 +55,6 @@ class RiskService:
         )
         if Decimal(daily_loss or 0) <= (Decimal("0") - runtime.daily_loss_limit):
             reasons.append("Daily loss limit breached")
-        exposure = await ctx.session.scalar(
-            select(func.coalesce(func.sum(Position.entry_price * Position.quantity), 0)).where(
-                Position.status == "OPEN"
-            )
-        )
         quantity = ctx.metadata.get("quantity", Decimal("1"))
         projected = Decimal(exposure or 0) + (ctx.snapshot.price * quantity)
         if projected > runtime.exposure_cap:

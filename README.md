@@ -43,3 +43,7 @@ Remove the module name from `TP_ENABLED_MODULES`. The registry skips importing i
 - Money values are stored as `Decimal` and persisted with SQLAlchemy `Numeric` columns.
 - Configure `TP_ADMIN_PASSWORD_HASH` or set a non-default `TP_ADMIN_PASSWORD` before startup.
 - Tests use SQLite + in-memory store/event bus fallback; Redis is optional during local development.
+- The default SQLite database is single-writer and only suitable for local development; use PostgreSQL (`TP_DATABASE_URL`) for anything beyond that. Alembic migrations are the schema authority for production databases.
+- In live mode (`TP_ENABLE_LIVE_TRADING=true`) the synthetic market data fallback is disabled: events fail (and are retried) instead of trading on synthetic prices.
+- Old `event_outbox`, `pipeline_inbox`, `tradingview_events`, and `signals` rows are purged by the worker after `TP_RETENTION_DAYS` (default 30).
+- Websocket broadcast subscribers only receive messages published after they connect; messages sent while disconnected are not replayed.

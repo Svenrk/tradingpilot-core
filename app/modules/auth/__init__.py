@@ -13,7 +13,7 @@ from app.security import (
     delete_session,
     hash_password,
     require_session,
-    verify_password,
+    verify_password_async,
 )
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
@@ -30,15 +30,27 @@ class UserResponse(BaseModel):
     csrf_token: str
 
 
+def _login_attempts_key(request: Request, username: str) -> str:
+    client_host = request.client.host if request.client else "unknown"
+    return f"login:attempts:{client_host}:{username}"
+
+
 @router.post("/login", response_model=UserResponse)
 async def login(payload: LoginRequest, request: Request, response: Response) -> UserResponse:
     ctx = request.app.state.ctx
     settings = get_settings()
+    store = ctx.state["store"]
+    attempts_key = _login_attempts_key(request, payload.username)
+    attempts = await store.get(attempts_key)
+    if attempts is not None and int(attempts) >= settings.login_max_attempts:
+        raise HTTPException(status_code=429, detail="Too many login attempts, try again later")
     password_hash = ctx.state["auth_password_hash"]
-    if payload.username != settings.admin_username or not verify_password(
+    if payload.username != settings.admin_username or not await verify_password_async(
         payload.password, password_hash
     ):
+        await store.incr(attempts_key, ex=settings.login_attempt_window_seconds)
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    await store.delete(attempts_key)
     session = SessionData(
         user_id=payload.username,
         role=settings.admin_role,
