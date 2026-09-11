@@ -41,6 +41,15 @@ class Settings(BaseSettings):
     admin_password_hash: str | None = None
     admin_role: str = "paper"
     log_level: str = "INFO"
+    market_data_cache_ttl_seconds: float = 5.0
+    latest_price_ttl_seconds: int = 300
+    worker_concurrency: int = 4
+    worker_batch_size: int = 10
+    pending_claim_idle_seconds: int = 60
+    retention_days: int = 30
+    retention_interval_seconds: float = 3600.0
+    login_max_attempts: int = 5
+    login_attempt_window_seconds: int = 300
 
     @field_validator("enabled_modules", "symbol_allowlist", "timeframe_allowlist", mode="before")
     @classmethod

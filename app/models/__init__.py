@@ -4,7 +4,16 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Index,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -68,6 +77,10 @@ class Order(Base):
 
 class Position(Base):
     __tablename__ = "positions"
+    __table_args__ = (
+        Index("ix_positions_symbol_status", "symbol", "status"),
+        Index("ix_positions_status_closed_at", "status", "closed_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     symbol: Mapped[str] = mapped_column(String(32), index=True)
@@ -105,7 +118,9 @@ class EventOutbox(Base):
     stream: Mapped[str] = mapped_column(String(64), index=True)
     dedupe_key: Mapped[str] = mapped_column(String(128), unique=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON)
-    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
