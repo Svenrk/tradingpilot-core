@@ -57,3 +57,35 @@ async def test_paper_broker_execution_creates_position(test_env, test_db_url: st
         order, position = await ExecutionService(PaperBroker()).execute(pipeline_ctx)
         assert order.status == "FILLED"
         assert position.symbol == "BTCUSDT"
+
+
+@pytest.mark.asyncio
+async def test_execution_accumulates_existing_same_side_position(
+    test_env, test_db_url: str
+) -> None:
+    await init_db(test_db_url)
+    session_factory = get_session_factory(test_db_url)
+    ctx = AppContext(
+        settings=get_settings(),
+        session_factory=session_factory,
+        event_bus=MemoryEventBus(),
+    )
+    ctx.state["settings_service"] = SettingsService(MemoryStore(), get_settings())
+    async with session_factory() as session:
+        pipeline_ctx = PipelineContext(app=ctx, session=session, payload={"dedupe_key": "x"})
+        pipeline_ctx.snapshot = MarketSnapshot(
+            "BTCUSDT",
+            "1m",
+            Decimal("100"),
+            [Decimal("99"), Decimal("100")],
+        )
+        pipeline_ctx.signal = type(
+            "Signal",
+            (),
+            {"action": "BUY", "stop_loss": Decimal("99"), "take_profit": Decimal("102")},
+        )()
+        pipeline_ctx.risk_decision = type("RiskDecision", (), {"approved": True})()
+        _, position = await ExecutionService(PaperBroker()).execute(pipeline_ctx)
+        _, updated_position = await ExecutionService(PaperBroker()).execute(pipeline_ctx)
+        assert position.quantity == Decimal("2")
+        assert updated_position.quantity == Decimal("2")

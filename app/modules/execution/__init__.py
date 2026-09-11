@@ -5,6 +5,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.core.module import AppContext, BaseModule, PipelineContext, PipelineStep
 from app.models import Order, Position
@@ -65,32 +66,50 @@ class ExecutionService:
         result = await self.broker.place_order(order)
         order.status = result.status.upper()
         order.price = result.filled_price
+        position = await self._upsert_position(ctx, order, result)
+        return order, position
+
+    async def _upsert_position(
+        self,
+        ctx: PipelineContext,
+        order: Order,
+        result: BrokerOrderResult,
+    ) -> Position:
         position = await ctx.session.scalar(select(Position).where(Position.symbol == order.symbol))
         if position is None:
-            position = Position(
-                symbol=order.symbol,
-                side=order.side,
-                quantity=result.filled_quantity,
-                entry_price=result.filled_price,
-                stop_loss=order.stop_loss,
-                take_profit=order.take_profit,
-                status="OPEN",
-            )
-            ctx.session.add(position)
-        else:
-            if position.side != order.side:
-                raise RuntimeError("Conflicting open position exists for symbol")
-            combined_quantity = position.quantity + result.filled_quantity
-            position.entry_price = (
-                (position.entry_price * position.quantity)
-                + (result.filled_price * result.filled_quantity)
-            ) / combined_quantity
-            position.quantity = combined_quantity
-            position.stop_loss = order.stop_loss
-            position.take_profit = order.take_profit
-            position.status = "OPEN"
+            try:
+                async with ctx.session.begin_nested():
+                    position = Position(
+                        symbol=order.symbol,
+                        side=order.side,
+                        quantity=result.filled_quantity,
+                        entry_price=result.filled_price,
+                        stop_loss=order.stop_loss,
+                        take_profit=order.take_profit,
+                        status="OPEN",
+                    )
+                    ctx.session.add(position)
+                    await ctx.session.flush()
+                    return position
+            except IntegrityError:
+                position = await ctx.session.scalar(
+                    select(Position).where(Position.symbol == order.symbol)
+                )
+        if position is None:
+            raise RuntimeError("Unable to load position after insert attempt")
+        if position.side != order.side:
+            raise RuntimeError("Conflicting open position exists for symbol")
+        combined_quantity = position.quantity + result.filled_quantity
+        position.entry_price = (
+            (position.entry_price * position.quantity)
+            + (result.filled_price * result.filled_quantity)
+        ) / combined_quantity
+        position.quantity = combined_quantity
+        position.stop_loss = order.stop_loss
+        position.take_profit = order.take_profit
+        position.status = "OPEN"
         await ctx.session.flush()
-        return order, position
+        return position
 
 
 async def execute_order_step(ctx: PipelineContext) -> None:

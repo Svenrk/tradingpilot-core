@@ -20,6 +20,7 @@ from app.schemas import (
 from app.security import get_session_data, require_role
 
 router = APIRouter(prefix="/api/v1", tags=["dashboard"])
+READ_ROLES = {"read", "paper", "live"}
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -93,7 +94,7 @@ async def ws_updates(websocket: WebSocket) -> None:
     ctx = websocket.app.state.ctx
     session_id = websocket.cookies.get(ctx.settings.session_cookie_name)
     session = await get_session_data(ctx.state["store"], session_id)
-    if session is None:
+    if session is None or session.role not in READ_ROLES:
         await websocket.close(code=4401)
         return
     await websocket.accept()

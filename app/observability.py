@@ -19,8 +19,9 @@ _BASE_RECORD_FACTORY = logging.getLogRecordFactory()
 
 class SecretRedactionFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        if isinstance(record.msg, str):
-            record.msg = _SECRET_RE.sub(r"\1=[REDACTED]", record.msg)
+        rendered = record.getMessage()
+        record.msg = _SECRET_RE.sub(r"\1=[REDACTED]", rendered)
+        record.args = ()
         return True
 
 

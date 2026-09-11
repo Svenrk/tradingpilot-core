@@ -12,28 +12,31 @@ class Base(DeclarativeBase):
     pass
 
 
-_engine = None
-_session_factory: async_sessionmaker[AsyncSession] | None = None
+_engines: dict[str, object] = {}
+_session_factories: dict[str, async_sessionmaker[AsyncSession]] = {}
 
 
 def get_engine(url: str | None = None):
-    global _engine
-    if _engine is None or url is not None:
-        _engine = create_async_engine(url or get_settings().database_url, future=True)
-    return _engine
+    resolved_url = url or get_settings().database_url
+    engine = _engines.get(resolved_url)
+    if engine is None:
+        engine = create_async_engine(resolved_url, future=True)
+        _engines[resolved_url] = engine
+    return engine
 
 
 def get_session_factory(url: str | None = None) -> async_sessionmaker[AsyncSession]:
-    global _session_factory
-    if _session_factory is None or url is not None:
-        _session_factory = async_sessionmaker(get_engine(url), expire_on_commit=False)
-    return _session_factory
+    resolved_url = url or get_settings().database_url
+    session_factory = _session_factories.get(resolved_url)
+    if session_factory is None:
+        session_factory = async_sessionmaker(get_engine(resolved_url), expire_on_commit=False)
+        _session_factories[resolved_url] = session_factory
+    return session_factory
 
 
 def reset_db_state() -> None:
-    global _engine, _session_factory
-    _engine = None
-    _session_factory = None
+    _engines.clear()
+    _session_factories.clear()
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
