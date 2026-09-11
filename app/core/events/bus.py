@@ -22,6 +22,7 @@ class EventBus(Protocol):
     async def iter_stream(self, stream: str, consumer: str, group: str) -> AsyncIterator[dict]: ...
     def iter_broadcast(self, stream: str) -> AsyncIterator[dict]: ...
     async def ack(self, stream: str, group: str, message_id: str) -> None: ...
+    async def pending_count(self, stream: str, group: str) -> int: ...
     async def close(self) -> None: ...
 
 
@@ -86,6 +87,10 @@ class MemoryEventBus:
 
     async def ack(self, stream: str, group: str, message_id: str) -> None:
         del stream, group, message_id
+
+    async def pending_count(self, stream: str, group: str) -> int:
+        del group
+        return self._queues[stream].qsize()
 
     async def close(self) -> None:
         return None
@@ -188,6 +193,11 @@ class RedisStreamBus:
 
     async def ack(self, stream: str, group: str, message_id: str) -> None:
         await self.redis.xack(stream, group, message_id)
+
+    async def pending_count(self, stream: str, group: str) -> int:
+        await self._ensure_group(stream, group)
+        summary = await self.redis.xpending(stream, group)
+        return int(summary.get("pending", 0)) if isinstance(summary, dict) else 0
 
     async def close(self) -> None:
         await self.redis.aclose()

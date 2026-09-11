@@ -5,15 +5,14 @@ import base64
 import hashlib
 import hmac
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from secrets import token_urlsafe
 from typing import Any, Protocol
 
 from fastapi import HTTPException, Request, status
 from pydantic import BaseModel
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse
 
 from app.config import Settings
 
@@ -150,36 +149,63 @@ def is_public_path(path: str) -> bool:
     return path in PUBLIC_PATHS or path.startswith("/api/v1/tv/webhook/")
 
 
-class SecurityMiddleware(BaseHTTPMiddleware):
+class SecurityMiddleware:
+    """Pure ASGI middleware: session/CSRF enforcement plus security headers.
+
+    Avoids Starlette's BaseHTTPMiddleware task-per-request wrapper and skips
+    the session-store lookup entirely for public paths.
+    """
+
+    _SECURITY_HEADERS = (
+        (b"x-frame-options", b"DENY"),
+        (b"x-content-type-options", b"nosniff"),
+        (b"referrer-policy", b"no-referrer"),
+        (b"cache-control", b"no-store"),
+    )
+
     def __init__(self, app, *, settings: Settings, store: KeyValueStore) -> None:
-        super().__init__(app)
+        self.app = app
         self.settings = settings
         self.store = store
 
-    async def dispatch(
-        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
-        if is_public_path(request.url.path):
-            request.state.session = None
+    async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        scope.setdefault("state", {})
+        if is_public_path(scope["path"]):
+            scope["state"]["session"] = None
         else:
+            request = Request(scope)
             session_id = request.cookies.get(self.settings.session_cookie_name)
-            request.state.session = await get_session_data(self.store, session_id)
-            if request.state.session is None:
-                return JSONResponse(
+            session = await get_session_data(self.store, session_id)
+            scope["state"]["session"] = session
+            if session is None:
+                response = JSONResponse(
                     {"detail": "Authentication required"}, status_code=status.HTTP_401_UNAUTHORIZED
                 )
-            if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+                await response(scope, receive, send)
+                return
+            if scope["method"] in {"POST", "PUT", "PATCH", "DELETE"}:
                 csrf_token = request.headers.get("X-CSRF-Token")
-                if csrf_token != request.state.session.csrf_token:
-                    return JSONResponse(
+                if csrf_token != session.csrf_token:
+                    response = JSONResponse(
                         {"detail": "Invalid CSRF token"}, status_code=status.HTTP_403_FORBIDDEN
                     )
-        response = await call_next(request)
-        response.headers.setdefault("X-Frame-Options", "DENY")
-        response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        response.headers.setdefault("Referrer-Policy", "no-referrer")
-        response.headers.setdefault("Cache-Control", "no-store")
-        return response
+                    await response(scope, receive, send)
+                    return
+
+        async def send_with_headers(message: dict) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                existing = {key.lower() for key, _ in headers}
+                for key, value in self._SECURITY_HEADERS:
+                    if key not in existing:
+                        headers.append((key, value))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
 def require_session(request: Request) -> SessionData:

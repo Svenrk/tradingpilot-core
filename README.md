@@ -47,3 +47,4 @@ Remove the module name from `TP_ENABLED_MODULES`. The registry skips importing i
 - In live mode (`TP_ENABLE_LIVE_TRADING=true`) the synthetic market data fallback is disabled: events fail (and are retried) instead of trading on synthetic prices.
 - Old `event_outbox`, `pipeline_inbox`, `tradingview_events`, and `signals` rows are purged by the worker after `TP_RETENTION_DAYS` (default 30).
 - Websocket broadcast subscribers only receive messages published after they connect; messages sent while disconnected are not replayed.
+- The worker logs hot-spot metrics every `TP_METRICS_INTERVAL_SECONDS` (default 60): pipeline step timings, outbox lag, consumer-group pending count, and market-data cache hit rate.

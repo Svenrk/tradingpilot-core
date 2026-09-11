@@ -23,10 +23,10 @@ class SignalDecision:
 def ema(values: list[Decimal], period: int) -> float:
     data = np.array([float(value) for value in values], dtype=float)
     alpha = 2 / (period + 1)
-    current = data[0]
-    for value in data[1:]:
-        current = alpha * value + (1 - alpha) * current
-    return float(current)
+    decay = (1 - alpha) ** np.arange(len(data) - 1, -1, -1, dtype=float)
+    weights = alpha * decay
+    weights[0] = decay[0]
+    return float(np.dot(weights, data))
 
 
 def rsi(values: list[Decimal], period: int = 14) -> float:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from functools import partial
 from typing import Any
 from uuid import uuid4
@@ -16,7 +17,7 @@ from app.core.module import AppContext, PipelineContext
 from app.core.registry import ModuleRegistry
 from app.db import get_session_factory, init_db
 from app.models import TradingViewEvent
-from app.observability import configure_logging
+from app.observability import configure_logging, metrics
 from app.security import create_store
 from workers.loop import run_loop
 
@@ -40,7 +41,9 @@ async def process_pipeline_message(ctx: AppContext, payload: dict) -> bool:
         pipeline_ctx = PipelineContext(app=ctx, session=session, payload=payload, event=event)
         try:
             for step in ctx.registry.pipeline_steps():
+                started = time.perf_counter()
                 await step.handler(pipeline_ctx)
+                metrics.observe(f"pipeline.step.{step.name}", time.perf_counter() - started)
             await session.commit()
         except Exception:
             await session.rollback()
@@ -114,6 +117,13 @@ async def reclaim_pending(ctx: AppContext) -> None:
         await asyncio.gather(*(_handle_message(ctx, payload, semaphore) for payload in payloads))
 
 
+async def report_metrics(ctx: AppContext) -> None:
+    """Log hot-spot metrics: step timings, outbox lag, pending count, cache hit rate."""
+    pending = await ctx.event_bus.pending_count("tv_events", "pipeline")
+    metrics.set_gauge("stream.tv_events.pending", pending)
+    logger.info("Worker metrics: %s", metrics.snapshot())
+
+
 async def run_worker() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
@@ -136,6 +146,11 @@ async def run_worker() -> None:
             "purge_history",
             partial(purge_expired_history, ctx),
             ctx.settings.retention_interval_seconds,
+        ),
+        run_loop(
+            "report_metrics",
+            partial(report_metrics, ctx),
+            ctx.settings.metrics_interval_seconds,
         ),
     ]
     for module in registry.modules:
