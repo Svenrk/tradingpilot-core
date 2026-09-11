@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import logging
+
 from fastapi import APIRouter, Depends, WebSocket
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.core.module import BaseModule
+from app.core.module import AppContext, BaseModule
 from app.db import get_session
 from app.models import Order, Position, Signal, TradingViewEvent
 from app.schemas import (
@@ -17,8 +21,61 @@ from app.schemas import (
 )
 from app.security import get_session_data, require_role
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/v1", tags=["dashboard"])
 READ_ROLES = {"read", "paper", "live"}
+
+
+class UiBroadcaster:
+    """Single stream reader fanning out to bounded per-client queues.
+
+    One reader task consumes the broadcast stream regardless of how many
+    websocket clients are connected. Slow clients get their oldest messages
+    dropped instead of stalling the shared reader.
+    """
+
+    def __init__(self, ctx: AppContext, stream: str = "ui_updates", queue_size: int = 100) -> None:
+        self._ctx = ctx
+        self._stream = stream
+        self._queue_size = queue_size
+        self._subscribers: set[asyncio.Queue[dict]] = set()
+        self._reader: asyncio.Task | None = None
+
+    def subscribe(self) -> asyncio.Queue[dict]:
+        queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=self._queue_size)
+        self._subscribers.add(queue)
+        if self._reader is None or self._reader.done():
+            self._reader = asyncio.create_task(self._read_forever())
+        return queue
+
+    def unsubscribe(self, queue: asyncio.Queue[dict]) -> None:
+        self._subscribers.discard(queue)
+
+    async def _read_forever(self) -> None:
+        try:
+            async for message in self._ctx.event_bus.iter_broadcast(self._stream):
+                for queue in list(self._subscribers):
+                    try:
+                        queue.put_nowait(message)
+                    except asyncio.QueueFull:
+                        with contextlib.suppress(asyncio.QueueEmpty):
+                            queue.get_nowait()
+                        with contextlib.suppress(asyncio.QueueFull):
+                            queue.put_nowait(message)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("UI broadcast reader failed")
+
+    async def close(self) -> None:
+        if self._reader is not None:
+            self._reader.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._reader
+            self._reader = None
+        self._subscribers.clear()
+
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -92,17 +149,30 @@ async def ws_updates(websocket: WebSocket) -> None:
     ctx = websocket.app.state.ctx
     session_id = websocket.cookies.get(ctx.settings.session_cookie_name)
     session = await get_session_data(ctx.state["store"], session_id)
-    csrf_token = websocket.query_params.get("csrf_token")
+    csrf_token = websocket.headers.get("X-CSRF-Token") or websocket.query_params.get("csrf_token")
     if session is None or session.role not in READ_ROLES or csrf_token != session.csrf_token:
         await websocket.close(code=4401)
         return
     await websocket.accept()
-    async for message in ctx.event_bus.iter_broadcast("ui_updates"):
-        await websocket.send_json(message)
+    broadcaster: UiBroadcaster = ctx.state["ui_broadcaster"]
+    queue = broadcaster.subscribe()
+    try:
+        while True:
+            await websocket.send_json(await queue.get())
+    finally:
+        broadcaster.unsubscribe(queue)
 
 
 class DashboardModule(BaseModule):
     name = "dashboard"
+
+    async def on_startup(self, ctx: AppContext) -> None:
+        ctx.state["ui_broadcaster"] = UiBroadcaster(ctx)
+
+    async def on_shutdown(self, ctx: AppContext) -> None:
+        broadcaster = ctx.state.get("ui_broadcaster")
+        if broadcaster is not None:
+            await broadcaster.close()
 
     def routers(self):
         return [router]

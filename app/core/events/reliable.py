@@ -54,7 +54,7 @@ async def purge_history(session: AsyncSession, *, older_than_days: int) -> int:
         delete(Signal).where(Signal.created_at < cutoff),
     ):
         result = await session.execute(statement)
-        deleted += result.rowcount or 0
+        deleted += int(getattr(result, "rowcount", 0) or 0)
     return deleted
 
 
