@@ -11,6 +11,7 @@ import httpx
 
 from app.core.module import AppContext, BaseModule, PipelineContext, PipelineStep
 from app.money import quantize, to_decimal
+from app.observability import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,9 @@ class SnapshotService:
     async def _get_closes(self, symbol: str, timeframe: str) -> list[Decimal]:
         cached = self._cache.get((symbol, timeframe))
         if cached is not None and (time.monotonic() - cached[0]) < self.cache_ttl_seconds:
+            metrics.increment("market_data.cache_hit")
             return cached[1]
+        metrics.increment("market_data.cache_miss")
         last_error: Exception | None = None
         for attempt in range(self.retries + 1):
             try:

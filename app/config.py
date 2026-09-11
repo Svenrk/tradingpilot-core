@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     pending_claim_idle_seconds: int = 60
     retention_days: int = 30
     retention_interval_seconds: float = 3600.0
+    metrics_interval_seconds: float = 60.0
     login_max_attempts: int = 5
     login_attempt_window_seconds: int = 300
 

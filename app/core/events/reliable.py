@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import EventOutbox, PipelineInbox, Signal, TradingViewEvent
+from app.observability import metrics
 
 
 async def enqueue_outbox(
@@ -32,9 +33,14 @@ async def flush_outbox(session: AsyncSession, bus, limit: int = 100) -> int:
     )
     records = list(result.scalars())
     if not records:
+        metrics.set_gauge("outbox.lag_seconds", 0.0)
         return 0
     await bus.publish_many([(record.stream, record.payload) for record in records])
     now = datetime.now(UTC)
+    oldest = min(record.created_at for record in records)
+    if oldest.tzinfo is None:
+        oldest = oldest.replace(tzinfo=UTC)
+    metrics.set_gauge("outbox.lag_seconds", max((now - oldest).total_seconds(), 0.0))
     for record in records:
         record.published_at = now
     await session.flush()
