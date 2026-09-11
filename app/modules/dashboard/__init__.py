@@ -17,7 +17,7 @@ from app.schemas import (
     SignalResponse,
     VersionResponse,
 )
-from app.security import require_role
+from app.security import get_session_data, require_role
 
 router = APIRouter(prefix="/api/v1", tags=["dashboard"])
 
@@ -90,8 +90,13 @@ async def positions(
 
 @router.websocket("/ws/updates")
 async def ws_updates(websocket: WebSocket) -> None:
-    await websocket.accept()
     ctx = websocket.app.state.ctx
+    session_id = websocket.cookies.get(ctx.settings.session_cookie_name)
+    session = await get_session_data(ctx.state["store"], session_id)
+    if session is None:
+        await websocket.close(code=4401)
+        return
+    await websocket.accept()
     async for message in ctx.event_bus.iter_stream(
         "ui_updates", consumer=str(uuid4()), group="dashboard"
     ):

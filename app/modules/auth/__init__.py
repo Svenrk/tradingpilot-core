@@ -71,7 +71,9 @@ class AuthModule(BaseModule):
 
     async def on_startup(self, ctx: AppContext) -> None:
         settings = get_settings()
-        ctx.state["auth_password_hash"] = hash_password(settings.admin_password)
+        ctx.state["auth_password_hash"] = settings.admin_password_hash or hash_password(
+            settings.admin_password
+        )
         ctx.state["csrf_token_factory"] = __import__("secrets").token_urlsafe
 
     def routers(self):

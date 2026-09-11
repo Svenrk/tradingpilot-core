@@ -78,9 +78,14 @@ class ExecutionService:
             )
             ctx.session.add(position)
         else:
-            position.side = order.side
-            position.quantity = result.filled_quantity
-            position.entry_price = result.filled_price
+            if position.side != order.side:
+                raise RuntimeError("Conflicting open position exists for symbol")
+            combined_quantity = position.quantity + result.filled_quantity
+            position.entry_price = (
+                (position.entry_price * position.quantity)
+                + (result.filled_price * result.filled_quantity)
+            ) / combined_quantity
+            position.quantity = combined_quantity
             position.stop_loss = order.stop_loss
             position.take_profit = order.take_profit
             position.status = "OPEN"

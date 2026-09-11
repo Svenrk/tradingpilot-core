@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     default_broker: str = "paper"
     admin_username: str = "admin"
     admin_password: str = "admin"
+    admin_password_hash: str | None = None
     admin_role: str = "paper"
     log_level: str = "INFO"
 

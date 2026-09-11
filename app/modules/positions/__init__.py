@@ -18,23 +18,38 @@ class PositionService:
                 price = latest_prices.get(position.symbol)
                 if price is None:
                     continue
+                pnl = self._realized_pnl(
+                    position.side,
+                    position.entry_price,
+                    price,
+                    position.quantity,
+                )
                 if position.take_profit is not None and (
                     (position.side == "BUY" and price >= position.take_profit)
                     or (position.side == "SELL" and price <= position.take_profit)
                 ):
                     position.status = "CLOSED"
-                    position.realized_pnl = abs((price - position.entry_price) * position.quantity)
+                    position.realized_pnl = pnl
                     position.closed_at = datetime.now(UTC)
                 elif position.stop_loss is not None and (
                     (position.side == "BUY" and price <= position.stop_loss)
                     or (position.side == "SELL" and price >= position.stop_loss)
                 ):
                     position.status = "CLOSED"
-                    position.realized_pnl = Decimal("0") - abs(
-                        (price - position.entry_price) * position.quantity
-                    )
+                    position.realized_pnl = pnl
                     position.closed_at = datetime.now(UTC)
             await session.commit()
+
+    @staticmethod
+    def _realized_pnl(
+        side: str,
+        entry_price: Decimal,
+        exit_price: Decimal,
+        quantity: Decimal,
+    ) -> Decimal:
+        if side == "SELL":
+            return (entry_price - exit_price) * quantity
+        return (exit_price - entry_price) * quantity
 
 
 async def reconcile_positions(ctx: AppContext) -> None:

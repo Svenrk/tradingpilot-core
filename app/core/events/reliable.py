@@ -40,11 +40,11 @@ async def flush_outbox(session: AsyncSession, bus, limit: int = 100) -> int:
 
 
 async def record_inbox(session: AsyncSession, *, stream: str, dedupe_key: str) -> bool:
-    marker = PipelineInbox(stream=stream, dedupe_key=dedupe_key)
-    session.add(marker)
     try:
-        await session.flush()
+        async with session.begin_nested():
+            marker = PipelineInbox(stream=stream, dedupe_key=dedupe_key)
+            session.add(marker)
+            await session.flush()
     except IntegrityError:
-        await session.rollback()
         return False
     return True
