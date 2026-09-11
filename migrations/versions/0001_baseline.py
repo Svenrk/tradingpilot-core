@@ -56,7 +56,7 @@ def upgrade() -> None:
     op.create_table(
         "positions",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("symbol", sa.String(length=32), nullable=False, unique=True),
+        sa.Column("symbol", sa.String(length=32), nullable=False),
         sa.Column("side", sa.String(length=8), nullable=False),
         sa.Column("quantity", NUMERIC, nullable=False),
         sa.Column("entry_price", NUMERIC, nullable=False),

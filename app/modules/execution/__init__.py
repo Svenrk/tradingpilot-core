@@ -77,7 +77,9 @@ class ExecutionService:
         result: BrokerOrderResult,
     ) -> Position:
         position = await ctx.session.scalar(
-            select(Position).where(Position.symbol == order.symbol).with_for_update()
+            select(Position)
+            .where(Position.symbol == order.symbol, Position.status == "OPEN")
+            .with_for_update()
         )
         if position is None:
             try:
@@ -96,7 +98,9 @@ class ExecutionService:
                     return position
             except IntegrityError:
                 position = await ctx.session.scalar(
-                    select(Position).where(Position.symbol == order.symbol).with_for_update()
+                    select(Position)
+                    .where(Position.symbol == order.symbol, Position.status == "OPEN")
+                    .with_for_update()
                 )
         if position is None:
             raise RuntimeError("Unable to load position after insert attempt")

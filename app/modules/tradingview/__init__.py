@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -52,7 +53,14 @@ async def receive_webhook(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Symbol not allowed")
     if payload.timeframe not in settings.timeframe_allowlist:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Timeframe not allowed")
-    dedupe_key = payload.event_id or hashlib.sha256(body).hexdigest()
+    dedupe_key = (
+        payload.event_id
+        or hashlib.sha256(
+            json.dumps(
+                payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+        ).hexdigest()
+    )
     try:
         event = TradingViewEvent(
             webhook_id=webhook_id,

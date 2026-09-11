@@ -70,7 +70,7 @@ class Position(Base):
     __tablename__ = "positions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    symbol: Mapped[str] = mapped_column(String(32), unique=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
     side: Mapped[str] = mapped_column(String(8))
     quantity: Mapped[Decimal] = mapped_column(NUMERIC)
     entry_price: Mapped[Decimal] = mapped_column(NUMERIC)

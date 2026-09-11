@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import os
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
 from secrets import token_urlsafe
 from typing import Any, Protocol
 
@@ -33,14 +34,21 @@ class KeyValueStore(Protocol):
 
 class MemoryStore:
     def __init__(self) -> None:
-        self._data: dict[str, str] = {}
+        self._data: dict[str, tuple[str, datetime | None]] = {}
 
     async def get(self, key: str) -> str | None:
-        return self._data.get(key)
+        value = self._data.get(key)
+        if value is None:
+            return None
+        payload, expires_at = value
+        if expires_at is not None and datetime.now(UTC) >= expires_at:
+            self._data.pop(key, None)
+            return None
+        return payload
 
     async def set(self, key: str, value: str, ex: int | None = None) -> None:
-        del ex
-        self._data[key] = value
+        expires_at = None if ex is None else datetime.now(UTC) + timedelta(seconds=ex)
+        self._data[key] = (value, expires_at)
 
     async def delete(self, key: str) -> None:
         self._data.pop(key, None)

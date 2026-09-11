@@ -43,14 +43,15 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
 
 def configure_logging(level: str = "INFO") -> None:
     root = logging.getLogger()
-    if root.handlers:
-        return
-    logging.basicConfig(
-        level=getattr(logging, level.upper(), logging.INFO),
-        format="%(asctime)s %(levelname)s [%(name)s] [cid=%(correlation_id)s] %(message)s",
-    )
+    if not root.handlers:
+        logging.basicConfig(
+            level=getattr(logging, level.upper(), logging.INFO),
+            format="%(asctime)s %(levelname)s [%(name)s] [cid=%(correlation_id)s] %(message)s",
+        )
+    root.setLevel(getattr(logging, level.upper(), logging.INFO))
     for handler in root.handlers:
-        handler.addFilter(SecretRedactionFilter())
+        if not any(isinstance(filter_, SecretRedactionFilter) for filter_ in handler.filters):
+            handler.addFilter(SecretRedactionFilter())
     logging.setLogRecordFactory(_record_factory)
 
 
