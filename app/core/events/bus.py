@@ -14,6 +14,7 @@ class EventBus(Protocol):
     ) -> dict | None: ...
     async def iter_stream(self, stream: str, consumer: str, group: str) -> AsyncIterator[dict]: ...
     async def iter_broadcast(self, stream: str) -> AsyncIterator[dict]: ...
+    async def ack(self, stream: str, group: str, message_id: str) -> None: ...
     async def close(self) -> None: ...
 
 
@@ -51,6 +52,9 @@ class MemoryEventBus:
         finally:
             self._subscribers[stream].discard(subscriber)
 
+    async def ack(self, stream: str, group: str, message_id: str) -> None:
+        del stream, group, message_id
+
     async def close(self) -> None:
         return None
 
@@ -86,8 +90,9 @@ class RedisStreamBus:
             return None
         _, entries = response[0]
         message_id, values = entries[0]
-        await self.redis.xack(stream, group, message_id)
-        return {key: json.loads(value) for key, value in values.items()}
+        payload = {key: json.loads(value) for key, value in values.items()}
+        payload["_message_id"] = message_id
+        return payload
 
     async def iter_stream(self, stream: str, consumer: str, group: str) -> AsyncIterator[dict]:
         while True:
@@ -105,6 +110,9 @@ class RedisStreamBus:
             for message_id, values in entries:
                 last_id = message_id
                 yield {key: json.loads(value) for key, value in values.items()}
+
+    async def ack(self, stream: str, group: str, message_id: str) -> None:
+        await self.redis.xack(stream, group, message_id)
 
     async def close(self) -> None:
         await self.redis.aclose()

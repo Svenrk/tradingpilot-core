@@ -50,7 +50,7 @@ async def login(payload: LoginRequest, request: Request, response: Response) -> 
         session_id,
         httponly=True,
         samesite="strict",
-        secure=True,
+        secure=settings.session_cookie_secure,
     )
     return UserResponse.model_validate(session.model_dump())
 

@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.orm import DeclarativeBase
 
 from app.config import get_settings
@@ -12,7 +17,7 @@ class Base(DeclarativeBase):
     pass
 
 
-_engines: dict[str, object] = {}
+_engines: dict[str, AsyncEngine] = {}
 _session_factories: dict[str, async_sessionmaker[AsyncSession]] = {}
 
 
@@ -35,6 +40,8 @@ def get_session_factory(url: str | None = None) -> async_sessionmaker[AsyncSessi
 
 
 def reset_db_state() -> None:
+    for engine in _engines.values():
+        engine.sync_engine.dispose()
     _engines.clear()
     _session_factories.clear()
 

@@ -27,13 +27,13 @@ async def _run_loop_spec(ctx: AppContext, spec: Any) -> None:
     await spec.coro_factory(ctx)
 
 
-async def process_pipeline_message(ctx: AppContext, payload: dict) -> None:
+async def process_pipeline_message(ctx: AppContext, payload: dict) -> bool:
     assert ctx.registry is not None
     async with ctx.session_factory() as session:
         event_id = payload.get("event_id")
         dedupe_key = payload["dedupe_key"]
         if not await record_inbox(session, stream="tv_events", dedupe_key=dedupe_key):
-            return
+            return True
         event = await session.scalar(
             select(TradingViewEvent).where(TradingViewEvent.id == event_id)
         )
@@ -45,7 +45,7 @@ async def process_pipeline_message(ctx: AppContext, payload: dict) -> None:
         except Exception:
             await session.rollback()
             logger.exception("Pipeline rejected event %s", dedupe_key)
-            return
+            return False
     await ctx.event_bus.publish(
         "ui_updates",
         {
@@ -55,6 +55,7 @@ async def process_pipeline_message(ctx: AppContext, payload: dict) -> None:
             "order_id": getattr(pipeline_ctx.order, "id", None),
         },
     )
+    return True
 
 
 async def pump_outbox(ctx: AppContext) -> None:
@@ -71,7 +72,10 @@ async def consume_forever(ctx: AppContext) -> None:
             "tv_events", consumer=consumer, group="pipeline", timeout=1.0
         )
         if payload is not None:
-            await process_pipeline_message(ctx, payload)
+            message_id = payload.get("_message_id")
+            success = await process_pipeline_message(ctx, payload)
+            if success and isinstance(message_id, str):
+                await ctx.event_bus.ack("tv_events", "pipeline", message_id)
 
 
 async def run_worker() -> None:

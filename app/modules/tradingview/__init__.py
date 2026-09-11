@@ -6,7 +6,6 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,11 +53,6 @@ async def receive_webhook(
     if payload.timeframe not in settings.timeframe_allowlist:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Timeframe not allowed")
     dedupe_key = payload.event_id or hashlib.sha256(body).hexdigest()
-    existing = await session.scalar(
-        select(TradingViewEvent).where(TradingViewEvent.dedupe_key == dedupe_key)
-    )
-    if existing is not None:
-        return {"status": "duplicate", "dedupe_key": dedupe_key}
     try:
         event = TradingViewEvent(
             webhook_id=webhook_id,

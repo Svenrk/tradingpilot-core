@@ -69,3 +69,25 @@ async def test_webhook_rejects_bad_signature(client) -> None:
         headers={"X-Signature": "bad"},
     )
     assert response.status_code == 401
+
+
+async def test_webhook_rejects_symbol_allowlist(client) -> None:
+    body = b'{"symbol":"DOGEUSDT","timeframe":"1m","side":"BUY","price":"101.25"}'
+    response = await client.post(
+        "/api/v1/tv/webhook/demo",
+        content=body,
+        headers={"X-Signature": _signature(body), "Content-Type": "application/json"},
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Symbol not allowed"
+
+
+async def test_webhook_rejects_timeframe_allowlist(client) -> None:
+    body = b'{"symbol":"BTCUSDT","timeframe":"4h","side":"BUY","price":"101.25"}'
+    response = await client.post(
+        "/api/v1/tv/webhook/demo",
+        content=body,
+        headers={"X-Signature": _signature(body), "Content-Type": "application/json"},
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Timeframe not allowed"
