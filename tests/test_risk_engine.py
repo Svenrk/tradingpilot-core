@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -134,6 +135,7 @@ async def test_risk_engine_rejects_daily_loss_breach(test_env, test_db_url: str)
                 entry_price=Decimal("100"),
                 status="CLOSED",
                 realized_pnl=Decimal("-600"),
+                closed_at=datetime.now(UTC),
             )
         )
         await session.commit()

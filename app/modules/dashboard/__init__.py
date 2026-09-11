@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from uuid import uuid4
-
 from fastapi import APIRouter, Depends, WebSocket
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -98,9 +96,7 @@ async def ws_updates(websocket: WebSocket) -> None:
         await websocket.close(code=4401)
         return
     await websocket.accept()
-    async for message in ctx.event_bus.iter_stream(
-        "ui_updates", consumer=str(uuid4()), group="dashboard"
-    ):
+    async for message in ctx.event_bus.iter_broadcast("ui_updates"):
         await websocket.send_json(message)
 
 

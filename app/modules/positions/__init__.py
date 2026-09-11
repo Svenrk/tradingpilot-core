@@ -21,7 +21,7 @@ class PositionService:
                 pnl = self._realized_pnl(
                     position.side,
                     position.entry_price,
-                    price,
+                    position.take_profit or price,
                     position.quantity,
                 )
                 if position.take_profit is not None and (
@@ -35,6 +35,12 @@ class PositionService:
                     (position.side == "BUY" and price <= position.stop_loss)
                     or (position.side == "SELL" and price >= position.stop_loss)
                 ):
+                    pnl = self._realized_pnl(
+                        position.side,
+                        position.entry_price,
+                        position.stop_loss,
+                        position.quantity,
+                    )
                     position.status = "CLOSED"
                     position.realized_pnl = pnl
                     position.closed_at = datetime.now(UTC)

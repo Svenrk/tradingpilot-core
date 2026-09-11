@@ -7,6 +7,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -58,24 +59,28 @@ async def receive_webhook(
     )
     if existing is not None:
         return {"status": "duplicate", "dedupe_key": dedupe_key}
-    event = TradingViewEvent(
-        webhook_id=webhook_id,
-        dedupe_key=dedupe_key,
-        symbol=payload.symbol,
-        timeframe=payload.timeframe,
-        side=payload.side,
-        price=quantize(payload.price),
-        payload=payload.model_dump(mode="json"),
-    )
-    session.add(event)
-    await session.flush()
-    await enqueue_outbox(
-        session,
-        stream="tv_events",
-        dedupe_key=dedupe_key,
-        payload={"event_id": event.id, "dedupe_key": dedupe_key},
-    )
-    await session.commit()
+    try:
+        event = TradingViewEvent(
+            webhook_id=webhook_id,
+            dedupe_key=dedupe_key,
+            symbol=payload.symbol,
+            timeframe=payload.timeframe,
+            side=payload.side,
+            price=quantize(payload.price),
+            payload=payload.model_dump(mode="json"),
+        )
+        session.add(event)
+        await session.flush()
+        await enqueue_outbox(
+            session,
+            stream="tv_events",
+            dedupe_key=dedupe_key,
+            payload={"event_id": event.id, "dedupe_key": dedupe_key},
+        )
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        return {"status": "duplicate", "dedupe_key": dedupe_key}
     return {"status": "accepted", "event_id": event.id, "dedupe_key": dedupe_key}
 
 

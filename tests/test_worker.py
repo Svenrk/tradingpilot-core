@@ -120,3 +120,64 @@ async def test_process_pipeline_message_rolls_back_failed_steps(test_env, test_d
     message = await event_bus.consume("ui_updates", consumer="test", group="test", timeout=0.01)
     assert signal is None
     assert message is None
+
+
+@pytest.mark.asyncio
+async def test_process_pipeline_message_publishes_risk_rejection_without_order(
+    test_env, test_db_url: str
+) -> None:
+    await init_db(test_db_url)
+    session_factory = get_session_factory(test_db_url)
+    event_bus = MemoryEventBus()
+    ctx = AppContext(
+        settings=get_settings(),
+        session_factory=session_factory,
+        event_bus=event_bus,
+    )
+
+    async def rejection_step(pipeline_ctx: PipelineContext) -> None:
+        pipeline_ctx.session.add(
+            Signal(
+                symbol="BTCUSDT",
+                timeframe="1m",
+                action="SELL",
+                strength=Decimal("0.8"),
+                stop_loss=Decimal("101"),
+                take_profit=Decimal("98"),
+                rationale="reject",
+            )
+        )
+        pipeline_ctx.signal = type("SignalDecision", (), {"action": "SELL"})()
+        pipeline_ctx.risk_decision = type(
+            "RiskDecision",
+            (),
+            {"approved": False, "reasons": ["Kill switch enabled"]},
+        )()
+
+    ctx.registry = DummyRegistry([PipelineStep(name="reject", order=10, handler=rejection_step)])
+    async with session_factory() as session:
+        session.add(
+            TradingViewEvent(
+                webhook_id="demo",
+                dedupe_key="evt-3",
+                symbol="BTCUSDT",
+                timeframe="1m",
+                side="SELL",
+                price=Decimal("100"),
+                payload={"symbol": "BTCUSDT", "timeframe": "1m", "price": "100"},
+            )
+        )
+        await session.commit()
+
+    await process_pipeline_message(ctx, {"event_id": 1, "dedupe_key": "evt-3"})
+
+    async with session_factory() as session:
+        signal = await session.scalar(select(Signal).where(Signal.rationale == "reject"))
+    message = await event_bus.consume("ui_updates", consumer="test", group="test", timeout=0.01)
+    assert signal is not None
+    assert message == {
+        "dedupe_key": "evt-3",
+        "signal": "SELL",
+        "approved": False,
+        "order_id": None,
+    }

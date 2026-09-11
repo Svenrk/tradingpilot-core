@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -40,9 +41,12 @@ class RiskService:
         )
         if open_positions and open_positions >= runtime.max_positions:
             reasons.append("Max positions reached")
+        day_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
         daily_loss = await ctx.session.scalar(
             select(func.coalesce(func.sum(Position.realized_pnl), 0)).where(
-                Position.status == "CLOSED"
+                Position.status == "CLOSED",
+                Position.closed_at.is_not(None),
+                Position.closed_at >= day_start,
             )
         )
         if Decimal(daily_loss or 0) <= (Decimal("0") - runtime.daily_loss_limit):
