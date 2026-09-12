@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+# Comma-separated list read from env; NoDecode stops pydantic-settings from
+# JSON-decoding it before the CSV validator runs.
+CsvList = Annotated[list[str], NoDecode]
 
 DEFAULT_MODULES = [
     "tradingview",
@@ -28,9 +32,9 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     database_url: str = "sqlite+aiosqlite:///./tradingpilot.db"
     redis_url: str | None = None
-    enabled_modules: list[str] = Field(default_factory=lambda: list(DEFAULT_MODULES))
-    symbol_allowlist: list[str] = Field(default_factory=lambda: ["BTCUSDT", "ETHUSDT"])
-    timeframe_allowlist: list[str] = Field(default_factory=lambda: ["1m", "5m", "15m", "1h"])
+    enabled_modules: CsvList = Field(default_factory=lambda: list(DEFAULT_MODULES))
+    symbol_allowlist: CsvList = Field(default_factory=lambda: ["BTCUSDT", "ETHUSDT"])
+    timeframe_allowlist: CsvList = Field(default_factory=lambda: ["1m", "5m", "15m", "1h"])
     tv_webhook_secret: str = "change-me"
     session_cookie_name: str = "tp_session"
     session_cookie_secure: bool = False
