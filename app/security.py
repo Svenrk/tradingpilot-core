@@ -16,7 +16,7 @@ from starlette.responses import JSONResponse
 
 from app.config import Settings
 
-PUBLIC_PATHS = {"/", "/api/v1/health", "/api/v1/version", "/api/v1/auth/login"}
+PUBLIC_PATHS = {"/", "/dashboard", "/api/v1/health", "/api/v1/version", "/api/v1/auth/login"}
 
 
 class SessionData(BaseModel):
@@ -146,7 +146,11 @@ def _session_key(session_id: str) -> str:
 
 
 def is_public_path(path: str) -> bool:
-    return path in PUBLIC_PATHS or path.startswith("/api/v1/tv/webhook/")
+    return (
+        path in PUBLIC_PATHS
+        or path.startswith("/api/v1/tv/webhook/")
+        or path.startswith("/api/v1/markets/")
+    )
 
 
 class SecurityMiddleware:
