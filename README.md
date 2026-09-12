@@ -22,6 +22,7 @@ TradingView -> /api/v1/tv/webhook/{webhook_id}
    docker compose up --build
    ```
 3. API: `http://localhost:8000`, health: `http://localhost:8000/api/v1/health`.
+4. Markets dashboard: `http://localhost:8000/dashboard` — Crypto and Stocks tabs, each with a top-50 list by 24h volume and a top-50 list by 24h % change (JSON at `/api/v1/markets/crypto` and `/api/v1/markets/stocks`).
 
 ## Add a new module
 

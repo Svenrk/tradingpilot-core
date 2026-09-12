@@ -16,6 +16,7 @@ DEFAULT_MODULES = [
     "auth",
     "settings",
     "dashboard",
+    "markets",
 ]
 
 
