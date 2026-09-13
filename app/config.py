@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     ml_model_dir: str = "./models"
     ml_inference_bars: int = 400
     ml_persist_bars: bool = True
+    ml_training_stale_seconds: int = 3600
     worker_concurrency: int = 4
     worker_batch_size: int = 10
     pending_claim_idle_seconds: int = 60

@@ -8,7 +8,9 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     DateTime,
+    Float,
     Index,
+    Integer,
     Numeric,
     String,
     Text,
@@ -119,6 +121,37 @@ class MarketBar(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=func.now()
     )
+
+
+class MLTrainingRun(Base):
+    __tablename__ = "ml_training_runs"
+    __table_args__ = (
+        Index(
+            "ix_ml_training_runs_symbol_timeframe_started_at",
+            "symbol",
+            "timeframe",
+            "started_at",
+        ),
+        Index("ix_ml_training_runs_status_updated_at", "status", "updated_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    timeframe: Mapped[str] = mapped_column(String(16), index=True)
+    status: Mapped[str] = mapped_column(String(16), index=True)
+    stage: Mapped[str] = mapped_column(String(64), default="")
+    progress: Mapped[float | None] = mapped_column(Float, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=func.now()
+    )
+    n_bars: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_samples: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    config: Mapped[dict[str, Any]] = mapped_column(JSON)
+    metrics: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_path: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class PipelineInbox(Base):

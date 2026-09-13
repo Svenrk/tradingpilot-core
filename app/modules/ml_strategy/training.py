@@ -15,7 +15,7 @@ training set. We therefore:
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
@@ -187,7 +187,12 @@ def _fit(lightgbm, params, x_train, y_train, w_train, config, x_valid=None, y_va
 
 
 def train_strategy(
-    arrays: BarArrays, *, symbol: str, timeframe: str, config: TrainingConfig | None = None
+    arrays: BarArrays,
+    *,
+    symbol: str,
+    timeframe: str,
+    config: TrainingConfig | None = None,
+    on_progress: Callable[[str, float], None] | None = None,
 ) -> tuple[StrategyModel, TrainingReport]:
     from app.modules.ml_strategy.model import _require_lightgbm
 
@@ -208,6 +213,8 @@ def train_strategy(
     folds: list[FoldReport] = []
     best_rounds: list[int] = []
     params = dict(config.lgbm_params)
+    if on_progress is not None:
+        on_progress("cross_validation", 0.05)
     for fold, (train_idx, test_idx) in enumerate(
         purged_walk_forward_splits(
             n,
@@ -254,6 +261,8 @@ def train_strategy(
             folds[-1].accuracy,
             best_iteration,
         )
+        if on_progress is not None:
+            on_progress(f"fold {fold + 1}/{config.n_folds}", 0.1 + (len(folds) / config.n_folds) * 0.7)
 
     if not folds:
         raise InsufficientDataError("No walk-forward folds could be evaluated")
@@ -281,6 +290,8 @@ def train_strategy(
 
     final_rounds = int(np.median(best_rounds))
     final_config = replace(config, num_boost_round=final_rounds)
+    if on_progress is not None:
+        on_progress("final_fit", 0.9)
     booster = _fit(lightgbm, params, x_all, y_all, weights, final_config)
     gain = booster.feature_importance(importance_type="gain")
     total_gain = float(gain.sum()) or 1.0
@@ -324,4 +335,6 @@ def train_strategy(
         },
         feature_importance=importance,
     )
+    if on_progress is not None:
+        on_progress("finalizing", 0.98)
     return StrategyModel(booster, metadata), report

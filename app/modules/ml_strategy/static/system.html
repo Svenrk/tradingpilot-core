@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TradingPilot System</title>
+<style>
+  :root {
+    --bg: #0f1420;
+    --panel: #171e2e;
+    --border: #263048;
+    --text: #e6ebf5;
+    --muted: #8b96ad;
+    --accent: #4f8cff;
+    --up: #2ecc71;
+    --down: #e74c3c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header { padding: 16px 24px 0; }
+  h1 { margin: 0 0 12px; font-size: 20px; }
+  .page-links {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .page-link {
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 13px;
+  }
+  .page-link.active { color: var(--text); }
+  .meta {
+    padding: 8px 24px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  main {
+    display: grid;
+    gap: 16px;
+    padding: 0 24px 24px;
+  }
+  section {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  section h2 {
+    margin: 0;
+    padding: 12px 16px;
+    font-size: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-body { padding: 16px; }
+  .status { color: var(--muted); }
+  .error {
+    padding: 12px 16px;
+    color: var(--down);
+    background: rgba(231, 76, 60, 0.08);
+    border: 1px solid rgba(231, 76, 60, 0.25);
+    border-radius: 8px;
+  }
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+  }
+  .summary-card {
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .summary-card .label {
+    color: var(--muted);
+    font-size: 12px;
+    margin-bottom: 4px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  th, td {
+    padding: 8px 12px;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    text-transform: uppercase;
+  }
+  .badge-running { background: rgba(79, 140, 255, 0.16); color: var(--accent); }
+  .badge-succeeded { background: rgba(46, 204, 113, 0.16); color: var(--up); }
+  .badge-failed { background: rgba(231, 76, 60, 0.16); color: var(--down); }
+  .badge-stale, .badge-queued { background: rgba(139, 150, 173, 0.16); color: var(--muted); }
+  .progress {
+    margin-top: 8px;
+    width: 100%;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .progress > span {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+  }
+  details { border-top: 1px solid var(--border); }
+  details summary {
+    cursor: pointer;
+    padding: 12px 16px;
+    color: var(--muted);
+  }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .wrap { white-space: normal; word-break: break-word; }
+  .small { color: var(--muted); font-size: 12px; }
+  .metric-list { display: flex; flex-wrap: wrap; gap: 8px 12px; }
+  .metric-list span { white-space: nowrap; }
+</style>
+</head>
+<body>
+<header>
+  <nav class="page-links" aria-label="Pages">
+    <a class="page-link" href="/dashboard">Markets</a>
+    <a class="page-link active" href="/system">System</a>
+  </nav>
+  <h1>TradingPilot System</h1>
+</header>
+<div class="meta" id="meta">Loading…</div>
+<main>
+  <section>
+    <h2>System info</h2>
+    <div class="panel-body" id="system-info"><div class="status">Loading…</div></div>
+  </section>
+  <section>
+    <h2>Model training</h2>
+    <div class="panel-body" id="training-status"><div class="status">Loading…</div></div>
+    <details>
+      <summary>Recent runs</summary>
+      <div class="panel-body" id="recent-runs"><div class="status">Loading…</div></div>
+    </details>
+  </section>
+  <section>
+    <h2>Loaded models</h2>
+    <div class="panel-body" id="loaded-models"><div class="status">Loading…</div></div>
+  </section>
+</main>
+<script>
+(function () {
+  "use strict";
+  var refreshTimer = null;
+  var refreshMs = 30000;
+
+  function fmtTime(value) {
+    return value ? new Date(value).toLocaleString() : "—";
+  }
+
+  function fmtNumber(value, digits) {
+    return value == null ? "—" : Number(value).toFixed(digits);
+  }
+
+  function fmtPercent(value) {
+    return value == null ? "—" : (Number(value) * 100).toFixed(1) + "%";
+  }
+
+  function fmtDuration(seconds) {
+    if (seconds == null) return "—";
+    var total = Math.max(Math.round(Number(seconds)), 0);
+    var mins = Math.floor(total / 60);
+    var secs = total % 60;
+    if (mins >= 60) return Math.floor(mins / 60) + "h " + (mins % 60) + "m";
+    if (mins > 0) return mins + "m " + secs + "s";
+    return secs + "s";
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;");
+  }
+
+  function fetchJson(url, options) {
+    return fetch(url, options).then(function (response) {
+      if (!response.ok) {
+        var error = new Error("HTTP " + response.status);
+        error.status = response.status;
+        throw error;
+      }
+      return response.json();
+    });
+  }
+
+  function renderSystemInfo(health, version, mode) {
+    document.getElementById("system-info").innerHTML =
+      '<div class="summary-grid">' +
+      '<div class="summary-card"><div class="label">Health</div><div>' + escapeHtml(health.status || "unknown") + "</div></div>" +
+      '<div class="summary-card"><div class="label">Version</div><div>' + escapeHtml(version.version || "unknown") + "</div></div>" +
+      '<div class="summary-card"><div class="label">ML mode</div><div>' + escapeHtml(mode || "unknown") + "</div></div>" +
+      "</div>";
+  }
+
+  function trainingMetrics(run) {
+    var metrics = run && run.metrics ? run.metrics : {};
+    var backtest = metrics.oos_backtest || {};
+    var thresholds = metrics.thresholds || {};
+    if (run && run.status === "failed") {
+      return '<div class="wrap">' + escapeHtml(run.error || "Training failed") + "</div>";
+    }
+    if (!run || metrics.oos_accuracy == null) return '<span class="small">No completed training run yet.</span>';
+    return (
+      '<div class="metric-list">' +
+      "<span>Acc " + fmtPercent(metrics.oos_accuracy) + "</span>" +
+      "<span>Log-loss " + fmtNumber(metrics.oos_log_loss, 4) + "</span>" +
+      "<span>Sharpe " + fmtNumber(backtest.sharpe, 2) + "</span>" +
+      "<span>Trades " + (backtest.trades == null ? "—" : backtest.trades) + "</span>" +
+      "<span>p≥" + fmtNumber(thresholds.min_probability, 2) + "</span>" +
+      "<span>edge≥" + fmtNumber(thresholds.min_edge, 3) + "</span>" +
+      "</div>"
+    );
+  }
+
+  function renderTrainingStatus(data) {
+    var container = document.getElementById("training-status");
+    if (!data.items.length) {
+      container.innerHTML = '<div class="status">No training runs or loaded models yet.</div>';
+      return;
+    }
+    var rows = data.items.map(function (item) {
+      var run = item.latest_run;
+      var status = run ? run.status : (item.loaded_model.loaded ? "succeeded" : "queued");
+      var progress = run && run.progress != null
+        ? '<div class="progress"><span style="width:' + Math.max(0, Math.min(run.progress, 1)) * 100 + '%"></span></div>'
+        : "";
+      var stage = run ? escapeHtml(run.stage || "—") : '<span class="small">No recorded run</span>';
+      var timing = run
+        ? "Started " + fmtTime(run.started_at) + "<br>Finished " + fmtTime(run.finished_at) + "<br>Duration " + fmtDuration(run.duration_seconds)
+        : "Model trained " + fmtTime(item.loaded_model.trained_at);
+      var samples = run && run.n_samples != null ? String(run.n_samples) : (item.loaded_model.n_samples != null ? String(item.loaded_model.n_samples) : "—");
+      var loaded = item.loaded_model.loaded
+        ? '<div class="small">Loaded model: ' + escapeHtml(item.loaded_model.trained_at || "yes") + "</div>"
+        : '<div class="small">Loaded model: none</div>';
+      return (
+        "<tr>" +
+        "<td><strong>" + escapeHtml(item.symbol + " / " + item.timeframe) + "</strong><div class=\"small mono\">" + escapeHtml(item.key) + "</div></td>" +
+        "<td><span class=\"badge badge-" + escapeHtml(status) + "\">" + escapeHtml(status) + "</span>" + loaded + "</td>" +
+        "<td>" + stage + progress + "</td>" +
+        "<td>" + timing + "</td>" +
+        "<td>" + escapeHtml(samples) + "</td>" +
+        "<td>" + trainingMetrics(run) + "</td>" +
+        "</tr>"
+      );
+    }).join("");
+    container.innerHTML =
+      "<table><thead><tr><th>Market</th><th>Status</th><th>Stage</th><th>Timing</th><th>Samples</th><th>Summary</th></tr></thead><tbody>" +
+      rows +
+      "</tbody></table>";
+  }
+
+  function renderRecentRuns(runs) {
+    var container = document.getElementById("recent-runs");
+    if (!runs.length) {
+      container.innerHTML = '<div class="status">No recent runs.</div>';
+      return;
+    }
+    var rows = runs.map(function (run) {
+      return (
+        "<tr>" +
+        "<td>" + escapeHtml(run.symbol + " / " + run.timeframe) + "</td>" +
+        "<td><span class=\"badge badge-" + escapeHtml(run.status) + "\">" + escapeHtml(run.status) + "</span></td>" +
+        "<td>" + escapeHtml(run.stage || "—") + "</td>" +
+        "<td>" + fmtTime(run.started_at) + "</td>" +
+        "<td>" + fmtTime(run.finished_at) + "</td>" +
+        "<td class=\"wrap\">" + escapeHtml(run.error || run.model_path || "—") + "</td>" +
+        "</tr>"
+      );
+    }).join("");
+    container.innerHTML =
+      "<table><thead><tr><th>Market</th><th>Status</th><th>Stage</th><th>Started</th><th>Finished</th><th>Details</th></tr></thead><tbody>" +
+      rows +
+      "</tbody></table>";
+  }
+
+  function renderLoadedModels(models, mode) {
+    var container = document.getElementById("loaded-models");
+    if (!models.length) {
+      container.innerHTML = '<div class="status">No loaded models. Current mode: ' + escapeHtml(mode) + "</div>";
+      return;
+    }
+    var rows = models.map(function (model) {
+      var metrics = model.metrics || {};
+      var backtest = metrics.oos_backtest || {};
+      return (
+        "<tr>" +
+        "<td><strong>" + escapeHtml(model.symbol + " / " + model.timeframe) + "</strong><div class=\"small mono\">" + escapeHtml(model.key) + "</div></td>" +
+        "<td>" + fmtTime(model.trained_at) + "</td>" +
+        "<td>" + escapeHtml(String(model.n_samples)) + "</td>" +
+        "<td class=\"wrap\">p≥" + fmtNumber(model.thresholds && model.thresholds.min_probability, 2) +
+          " · edge≥" + fmtNumber(model.thresholds && model.thresholds.min_edge, 3) + "</td>" +
+        "<td>Acc " + fmtPercent(metrics.oos_accuracy) +
+          " · Log-loss " + fmtNumber(metrics.oos_log_loss, 4) +
+          " · Sharpe " + fmtNumber(backtest.sharpe, 2) + "</td>" +
+        "</tr>"
+      );
+    }).join("");
+    container.innerHTML =
+      '<div class="small" style="margin-bottom:12px;">Current TP_ML_STRATEGY_MODE: ' + escapeHtml(mode) + "</div>" +
+      "<table><thead><tr><th>Model</th><th>Trained at</th><th>Samples</th><th>Thresholds</th><th>OOS metrics</th></tr></thead><tbody>" +
+      rows +
+      "</tbody></table>";
+  }
+
+  function showAuthMessage() {
+    var message = '<div class="error">Authentication required. Log in via <span class="mono">/api/v1/auth/login</span> to view training status and loaded models.</div>';
+    document.getElementById("training-status").innerHTML = message;
+    document.getElementById("recent-runs").innerHTML = message;
+    document.getElementById("loaded-models").innerHTML = message;
+  }
+
+  function scheduleRefresh(hasRunning) {
+    var next = hasRunning ? 5000 : 30000;
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshMs = next;
+    refreshTimer = setTimeout(load, refreshMs);
+  }
+
+  function load() {
+    Promise.all([
+      fetchJson("/api/v1/health"),
+      fetchJson("/api/v1/version"),
+      fetchJson("/api/v1/ml/training/status"),
+      fetchJson("/api/v1/ml/training/runs?limit=20"),
+      fetchJson("/api/v1/ml/models")
+    ]).then(function (results) {
+      var health = results[0];
+      var version = results[1];
+      var status = results[2];
+      var runs = results[3];
+      var models = results[4];
+      renderSystemInfo(health, version, status.ml_strategy_mode);
+      renderTrainingStatus(status);
+      renderRecentRuns(runs);
+      renderLoadedModels(models, status.ml_strategy_mode);
+      var hasRunning = status.items.some(function (item) {
+        return item.latest_run && item.latest_run.status === "running";
+      });
+      document.getElementById("meta").textContent =
+        "Updated " + new Date().toLocaleTimeString() + " · Refresh every " + Math.round((hasRunning ? 5000 : 30000) / 1000) + "s";
+      scheduleRefresh(hasRunning);
+    }).catch(function (error) {
+      if (error.status === 401) {
+        showAuthMessage();
+        document.getElementById("meta").textContent = "Authentication required";
+      } else {
+        var message = '<div class="error">Failed to load system data (' + escapeHtml(error.message) + ").</div>";
+        document.getElementById("training-status").innerHTML = message;
+        document.getElementById("recent-runs").innerHTML = message;
+        document.getElementById("loaded-models").innerHTML = message;
+        document.getElementById("meta").textContent = "Load failed";
+      }
+      scheduleRefresh(false);
+    });
+  }
+
+  load();
+})();
+</script>
+</body>
+</html>

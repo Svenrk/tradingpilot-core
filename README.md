@@ -25,6 +25,7 @@ A LightGBM strategy that runs beside the rule-based `signal_engine` and learns B
 - Labels use the **triple-barrier method**: a volatility-scaled take-profit (2σ), stop-loss (1σ) and a time barrier (`--horizon` bars). The same barriers become the live signal's `take_profit` / `stop_loss`, so the risk gate sees exactly what the model was trained to predict.
 - Training is **purged, embargoed walk-forward CV** (no label overlap between folds), with class/return-magnitude sample weights and early stopping. Trade thresholds (`min_probability`, `min_edge`) are selected only on out-of-sample forecasts by maximising Sharpe after costs, then a final model is refit on all data.
 - Models are stored as `models/<SYMBOL>_<timeframe>.json` (booster + metadata + OOS metrics) and hot-reloaded when the file changes.
+- Every `python -m workers.ml_train` run is recorded in `ml_training_runs` with persisted status, stage/progress, metrics, errors, and the saved model path.
 - `ml_signal` (order 25) writes its decision as a `Signal` row and combines it with the rule signal according to `TP_ML_STRATEGY_MODE`:
   - `shadow` (default) — record only; the rule-based signal still drives execution.
   - `primary` — the ML decision replaces the rule-based signal.
@@ -40,15 +41,17 @@ docker compose run --rm worker python -m workers.ml_train --symbol BTCUSDT --tim
 docker compose run --rm worker python -m workers.ml_train --symbol BTCUSDT --timeframe 1h
 ```
 
-The command prints a JSON report (fold metrics, OOS log-loss/accuracy, selected thresholds, OOS backtest vs. an unthresholded baseline, feature importance). Use `--dry-run` to evaluate without saving. Both `api` and `worker` mount `./models`, so a newly written model is picked up without a restart.
+The command prints a JSON report (fold metrics, OOS log-loss/accuracy, selected thresholds, OOS backtest vs. an unthresholded baseline, feature importance). Use `--dry-run` to evaluate without saving. Both `api` and `worker` mount `./models`, so a newly written model is picked up without a restart, and the latest training lifecycle is visible in the System panel.
 
 **Inspect**
 
 - `GET /api/v1/ml/models` — loaded models with thresholds and OOS metrics.
+- `GET /api/v1/ml/training/runs?limit=20` — recent persisted training runs.
+- `GET /api/v1/ml/training/status` — latest run per market plus loaded-model status and `TP_ML_STRATEGY_MODE`.
 - `GET /api/v1/ml/predict/{symbol}/{timeframe}` — current probabilities and decision from persisted bars.
 - `POST /api/v1/ml/models/reload` — force a reload.
 
-Settings: `TP_ML_STRATEGY_MODE`, `TP_ML_MODEL_DIR`, `TP_ML_INFERENCE_BARS` (bars loaded for inference, must exceed the 64-bar warm-up), `TP_ML_PERSIST_BARS`, `TP_MARKET_DATA_BAR_LIMIT`.
+Settings: `TP_ML_STRATEGY_MODE`, `TP_ML_MODEL_DIR`, `TP_ML_INFERENCE_BARS` (bars loaded for inference, must exceed the 64-bar warm-up), `TP_ML_PERSIST_BARS`, `TP_ML_TRAINING_STALE_SECONDS`, `TP_MARKET_DATA_BAR_LIMIT`.
 
 ## Run with Docker Compose
 
@@ -59,6 +62,7 @@ Settings: `TP_ML_STRATEGY_MODE`, `TP_ML_MODEL_DIR`, `TP_ML_INFERENCE_BARS` (bars
    ```
 3. API: `http://localhost:8000`, health: `http://localhost:8000/api/v1/health`.
 4. Markets dashboard: `http://localhost:8000/dashboard` — Crypto and Stocks tabs, each with a top-50 list by 24h volume and a top-50 list by 24h % change (JSON at `/api/v1/markets/crypto` and `/api/v1/markets/stocks`).
+5. System panel: `http://localhost:8000/system` — model-training status, recent runs, loaded models, and basic health/version info. If the ML APIs return `401`, log in first via `/api/v1/auth/login`.
 
 ## Add a new module
 

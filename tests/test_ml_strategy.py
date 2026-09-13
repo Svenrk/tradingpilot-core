@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from app.config import get_settings
 from app.core.events.bus import MemoryEventBus
 from app.core.module import AppContext, PipelineContext
 from app.db import get_session_factory, init_db
+from app.models import MLTrainingRun
 from app.modules.market_data import Bar, MarketSnapshot, SnapshotService
 from app.modules.ml_strategy import (
     MLStrategyModule,
@@ -203,6 +205,89 @@ async def test_ml_api_endpoints(client, test_db_url: str, tmp_path: Path) -> Non
     )
     assert reload.status_code == 200
     assert len(reload.json()) == 1
+
+
+async def test_ml_training_status_endpoints_and_system_page(client, test_db_url: str) -> None:
+    settings = get_settings()
+    arrays = regime_arrays(n=900)
+    model, report = train_strategy(arrays, symbol="BTCUSDT", timeframe="1h", config=FAST_CONFIG)
+    model.save(model_path(Path(settings.ml_model_dir), "BTCUSDT", "1h"))
+    now = datetime.now(UTC)
+    async with get_session_factory(test_db_url)() as session:
+        session.add_all(
+            [
+                MLTrainingRun(
+                    symbol="BTCUSDT",
+                    timeframe="1h",
+                    status="failed",
+                    stage="failed",
+                    progress=1.0,
+                    started_at=now - timedelta(hours=3),
+                    finished_at=now - timedelta(hours=2, minutes=55),
+                    updated_at=now - timedelta(hours=3),
+                    n_bars=100,
+                    n_samples=80,
+                    config={"dry_run": False},
+                    error="older failure",
+                ),
+                MLTrainingRun(
+                    symbol="BTCUSDT",
+                    timeframe="1h",
+                    status="succeeded",
+                    stage="completed",
+                    progress=1.0,
+                    started_at=now - timedelta(minutes=30),
+                    finished_at=now - timedelta(minutes=25),
+                    updated_at=now - timedelta(minutes=25),
+                    n_bars=report.n_bars,
+                    n_samples=report.n_samples,
+                    config={"dry_run": False},
+                    metrics=report.to_dict(),
+                    model_path=str(model_path(Path(settings.ml_model_dir), "BTCUSDT", "1h")),
+                ),
+                MLTrainingRun(
+                    symbol="ETHUSDT",
+                    timeframe="15m",
+                    status="running",
+                    stage="fold 2/3",
+                    progress=0.5,
+                    started_at=now - timedelta(hours=2),
+                    updated_at=now - timedelta(hours=2),
+                    n_bars=400,
+                    n_samples=300,
+                    config={"dry_run": True},
+                ),
+            ]
+        )
+        await session.commit()
+
+    assert (await client.get("/api/v1/ml/training/status")).status_code == 401
+    assert (await client.get("/api/v1/ml/training/runs")).status_code == 401
+
+    login = await client.post(
+        "/api/v1/auth/login", json={"username": "admin", "password": "test-password"}
+    )
+    assert login.status_code == 200
+    status = await client.get("/api/v1/ml/training/status")
+    assert status.status_code == 200
+    body = status.json()
+    assert body["ml_strategy_mode"] == settings.ml_strategy_mode
+    latest = {item["key"]: item for item in body["items"]}
+    assert latest["BTCUSDT_1h"]["latest_run"]["status"] == "succeeded"
+    assert latest["BTCUSDT_1h"]["latest_run"]["model_path"].endswith("BTCUSDT_1h.json")
+    assert latest["BTCUSDT_1h"]["loaded_model"]["loaded"] is True
+    assert latest["ETHUSDT_15m"]["latest_run"]["status"] == "stale"
+
+    runs = await client.get("/api/v1/ml/training/runs?limit=2")
+    assert runs.status_code == 200
+    runs_body = runs.json()
+    assert [entry["symbol"] for entry in runs_body] == ["BTCUSDT", "ETHUSDT"]
+    assert runs_body[1]["status"] == "stale"
+
+    system = await client.get("/system")
+    assert system.status_code == 200
+    assert "text/html" in system.headers["content-type"]
+    assert "TradingPilot System" in system.text
 
 
 def test_bar_arrays_roundtrip() -> None:
