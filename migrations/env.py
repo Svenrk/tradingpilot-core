@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 import app.models  # noqa: F401
-from app.config import get_settings
 from app.db import Base
 from migrations.logging import configure_alembic_logging
 
 config = context.config
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+database_url = os.getenv("TP_DATABASE_URL")
+if database_url:
+    config.set_main_option("sqlalchemy.url", database_url)
 
 configure_alembic_logging(config)
 

@@ -13,8 +13,11 @@ services:
       - "6379:6379"
   migrate:
     build: .
+    working_dir: /app
     command: alembic upgrade head
     env_file: .env
+    environment:
+      PYTHONPATH: /app
     depends_on: [postgres, redis]
   api:
     build: .
