@@ -303,14 +303,15 @@ async def training_status(
     items = []
     for symbol, timeframe in pairs:
         model = loaded_models.get((symbol, timeframe))
+        latest_run = latest_runs.get((symbol, timeframe))
         items.append(
             {
                 "key": model_key(symbol, timeframe),
                 "symbol": symbol,
                 "timeframe": timeframe,
                 "latest_run": None
-                if (run := latest_runs.get((symbol, timeframe))) is None
-                else _training_payload(run, stale_seconds=stale_seconds),
+                if latest_run is None
+                else _training_payload(latest_run, stale_seconds=stale_seconds),
                 "loaded_model": {
                     "loaded": model is not None,
                     "trained_at": None if model is None else model["trained_at"],

@@ -222,7 +222,7 @@
     if (run && run.status === "failed") {
       return '<div class="wrap">' + escapeHtml(run.error || "Training failed") + "</div>";
     }
-    if (!run || !metrics.oos_accuracy) return '<span class="small">No completed training run yet.</span>';
+    if (!run || metrics.oos_accuracy == null) return '<span class="small">No completed training run yet.</span>';
     return (
       '<div class="metric-list">' +
       "<span>Acc " + fmtPercent(metrics.oos_accuracy) + "</span>" +
