@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -14,6 +14,7 @@ DEFAULT_MODULES = [
     "tradingview",
     "market_data",
     "signal_engine",
+    "ml_strategy",
     "risk_engine",
     "execution",
     "positions",
@@ -47,7 +48,14 @@ class Settings(BaseSettings):
     admin_role: str = "paper"
     log_level: str = "INFO"
     market_data_cache_ttl_seconds: float = 5.0
+    market_data_bar_limit: int = 200
     latest_price_ttl_seconds: int = 300
+    # ML strategy: "shadow" records ML signals without acting on them, "primary"
+    # replaces the rule-based signal, "confirm" only trades when both agree.
+    ml_strategy_mode: Literal["shadow", "primary", "confirm"] = "shadow"
+    ml_model_dir: str = "./models"
+    ml_inference_bars: int = 400
+    ml_persist_bars: bool = True
     worker_concurrency: int = 4
     worker_batch_size: int = 10
     pending_claim_idle_seconds: int = 60
