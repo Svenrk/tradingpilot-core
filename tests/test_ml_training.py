@@ -121,3 +121,23 @@ def test_predict_latest_requires_warmup() -> None:
         *(getattr(arrays, f)[:20] for f in ("open_time", "open", "high", "low", "close", "volume"))
     )
     assert model.predict_latest(short) is None
+
+
+def test_train_strategy_reports_progress_per_fold() -> None:
+    arrays = regime_arrays(n=900)
+    events: list[tuple[str, float]] = []
+    train_strategy(
+        arrays,
+        symbol="TEST",
+        timeframe="1h",
+        config=FAST_CONFIG,
+        on_progress=lambda stage, progress: events.append((stage, progress)),
+    )
+
+    assert [stage for stage, _ in events if stage.startswith("fold ")] == [
+        "fold 1/3",
+        "fold 2/3",
+        "fold 3/3",
+    ]
+    assert events[-2][0] == "final_fit"
+    assert events[-1][0] == "finalizing"

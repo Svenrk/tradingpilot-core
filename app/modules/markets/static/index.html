@@ -25,6 +25,17 @@
   header {
     padding: 16px 24px 0;
   }
+  .page-links {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .page-link {
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 13px;
+  }
+  .page-link.active { color: var(--text); }
   h1 { margin: 0 0 12px; font-size: 20px; }
   .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
   .tab {
@@ -79,6 +90,10 @@
 </head>
 <body>
 <header>
+  <nav class="page-links" aria-label="Pages">
+    <a class="page-link active" href="/dashboard">Markets</a>
+    <a class="page-link" href="/system">System</a>
+  </nav>
   <h1>TradingPilot Markets</h1>
   <div class="tabs" role="tablist">
     <button class="tab active" role="tab" data-market="crypto">Crypto</button>

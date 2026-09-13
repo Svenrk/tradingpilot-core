@@ -14,14 +14,19 @@ import logging
 import os
 from decimal import Decimal
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.module import AppContext, BaseModule, PipelineContext, PipelineStep
-from app.models import MarketBar, Signal
+from app.db import get_session
+from app.models import MarketBar, MLTrainingRun, Signal
 from app.modules.ml_strategy.model import StrategyModel, model_key, model_path
+from app.modules.ml_strategy.runs import list_recent_training_runs, training_run_payload
 from app.modules.ml_strategy.store import load_bar_arrays, upsert_bars
 from app.modules.signal_engine import SignalDecision
 from app.observability import metrics
@@ -30,6 +35,8 @@ from app.security import require_role
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/ml", tags=["ml"])
+pages_router = APIRouter(tags=["ml"])
+_STATIC_DIR = Path(__file__).parent / "static"
 
 
 class ModelRegistry:
@@ -185,8 +192,60 @@ class PredictionResponse(BaseModel):
     bars_used: int
 
 
+class TrainingRunSummary(BaseModel):
+    id: int
+    symbol: str
+    timeframe: str
+    status: Literal["queued", "running", "succeeded", "failed", "stale"]
+    stage: str
+    progress: float | None
+    started_at: str
+    finished_at: str | None
+    updated_at: str
+    duration_seconds: float
+    n_bars: int | None
+    n_samples: int | None
+    config: dict[str, Any]
+    metrics: dict[str, Any] | None
+    error: str | None
+    model_path: str | None
+
+
+class LoadedModelStatus(BaseModel):
+    loaded: bool
+    trained_at: str | None
+    n_samples: int | None
+    thresholds: dict[str, float] | None
+    metrics: dict[str, Any] | None
+
+
+class TrainingStatusEntry(BaseModel):
+    key: str
+    symbol: str
+    timeframe: str
+    latest_run: TrainingRunSummary | None
+    loaded_model: LoadedModelStatus
+
+
+class TrainingStatusResponse(BaseModel):
+    ml_strategy_mode: Literal["shadow", "primary", "confirm"]
+    items: list[TrainingStatusEntry]
+
+
 def _registry(request: Request) -> ModelRegistry:
     return request.app.state.ctx.state["ml_model_registry"]
+
+
+def _isoformat(value) -> str | None:
+    return None if value is None else value.isoformat()
+
+
+def _training_payload(run: MLTrainingRun, *, stale_seconds: int) -> dict[str, Any]:
+    payload = training_run_payload(run, stale_seconds=stale_seconds)
+    payload["started_at"] = _isoformat(payload["started_at"])
+    payload["finished_at"] = _isoformat(payload["finished_at"])
+    payload["updated_at"] = _isoformat(payload["updated_at"])
+    return payload
 
 
 @router.get("/models", response_model=list[ModelSummary])
@@ -197,6 +256,71 @@ async def list_models(
     del session
     registry.load_all()
     return registry.describe()
+
+
+@router.get("/training/runs", response_model=list[TrainingRunSummary])
+async def training_runs(
+    request: Request,
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_session),
+    user=Depends(require_role("read", "paper", "live")),
+) -> list[dict[str, Any]]:
+    del user
+    runs = await list_recent_training_runs(db, limit=limit)
+    stale_seconds = request.app.state.ctx.settings.ml_training_stale_seconds
+    return [_training_payload(run, stale_seconds=stale_seconds) for run in runs]
+
+
+@router.get("/training/status", response_model=TrainingStatusResponse)
+async def training_status(
+    request: Request,
+    registry: Annotated[ModelRegistry, Depends(_registry)],
+    db: AsyncSession = Depends(get_session),
+    user=Depends(require_role("read", "paper", "live")),
+) -> dict[str, Any]:
+    del user
+    ctx: AppContext = request.app.state.ctx
+    stale_seconds = ctx.settings.ml_training_stale_seconds
+    registry.load_all()
+    loaded_models = {
+        (entry["symbol"], entry["timeframe"]): entry for entry in registry.describe()
+    }
+    runs = list(
+        (
+            await db.scalars(
+                select(MLTrainingRun).order_by(
+                    MLTrainingRun.started_at.desc(),
+                    MLTrainingRun.id.desc(),
+                )
+            )
+        ).all()
+    )
+    latest_runs: dict[tuple[str, str], MLTrainingRun] = {}
+    for run in runs:
+        latest_runs.setdefault((run.symbol, run.timeframe), run)
+
+    pairs = sorted(set(latest_runs) | set(loaded_models))
+    items = []
+    for symbol, timeframe in pairs:
+        model = loaded_models.get((symbol, timeframe))
+        items.append(
+            {
+                "key": model_key(symbol, timeframe),
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "latest_run": None
+                if (run := latest_runs.get((symbol, timeframe))) is None
+                else _training_payload(run, stale_seconds=stale_seconds),
+                "loaded_model": {
+                    "loaded": model is not None,
+                    "trained_at": None if model is None else model["trained_at"],
+                    "n_samples": None if model is None else model["n_samples"],
+                    "thresholds": None if model is None else model["thresholds"],
+                    "metrics": None if model is None else model["metrics"],
+                },
+            }
+        )
+    return {"ml_strategy_mode": ctx.settings.ml_strategy_mode, "items": items}
 
 
 @router.post("/models/reload", response_model=list[ModelSummary])
@@ -246,6 +370,11 @@ async def predict(
     }
 
 
+@pages_router.get("/system", include_in_schema=False)
+async def system_page() -> FileResponse:
+    return FileResponse(_STATIC_DIR / "system.html")
+
+
 class MLStrategyModule(BaseModule):
     name = "ml_strategy"
     depends_on = ("market_data", "signal_engine")
@@ -259,10 +388,10 @@ class MLStrategyModule(BaseModule):
         ctx.state["ml_model_registry"] = registry
 
     def models(self):
-        return [MarketBar]
+        return [MarketBar, MLTrainingRun]
 
     def routers(self):
-        return [router]
+        return [router, pages_router]
 
     def pipeline_steps(self):
         return [
