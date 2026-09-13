@@ -7,3 +7,5 @@ __pycache__/
 *.pyc
 alembic.ini.bak
 tradingpilot.db
+models/*
+!models/.gitkeep

@@ -26,8 +26,12 @@ services:
     depends_on: [postgres, redis, migrate]
     ports:
       - "8000:8000"
+    volumes:
+      - ./models:/app/models
   worker:
     build: .
     command: python -m workers.pipeline_worker
     env_file: .env
     depends_on: [postgres, redis, migrate]
+    volumes:
+      - ./models:/app/models

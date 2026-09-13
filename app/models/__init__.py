@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     DateTime,
     Index,
     Numeric,
@@ -95,6 +96,29 @@ class Position(Base):
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MarketBar(Base):
+    """Persisted OHLCV candle; the training corpus for the ML strategy."""
+
+    __tablename__ = "market_bars"
+    __table_args__ = (
+        UniqueConstraint("symbol", "timeframe", "open_time", name="uq_market_bars_key"),
+        Index("ix_market_bars_symbol_timeframe_open_time", "symbol", "timeframe", "open_time"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(32))
+    timeframe: Mapped[str] = mapped_column(String(16))
+    open_time: Mapped[int] = mapped_column(BigInteger)
+    open: Mapped[Decimal] = mapped_column(NUMERIC)
+    high: Mapped[Decimal] = mapped_column(NUMERIC)
+    low: Mapped[Decimal] = mapped_column(NUMERIC)
+    close: Mapped[Decimal] = mapped_column(NUMERIC)
+    volume: Mapped[Decimal] = mapped_column(NUMERIC)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=func.now()
+    )
 
 
 class PipelineInbox(Base):
